@@ -52,13 +52,13 @@ def print_log(log_info, log_path=config.log_path, console=True, debug=False):
                 f.writelines(log_info + '\n')
 
 
-def print_network(net):
+def print_network(net, log_path=config.log_path):
     """Print network information."""
     num_params = 0
     for param in net.parameters():
         num_params += param.numel()
-    print_log(str(net), logPath)
-    print_log('Total number of parameters: %d' % num_params, logPath)
+    print_log(str(net), log_path)
+    print_log('Total number of parameters: %d' % num_params, log_path)
 
 
 def save_config():
@@ -69,6 +69,7 @@ def save_config():
     fp.writelines("image_size\t\t\t\t%d\n" % config.image_size)
     fp.writelines("training_dataset_size\t\t\t\t%d\n" % config.training_dataset_size)
     fp.writelines("cur_time\t\t\t\t%s\n" % config.cur_time)
+    fp.writelines("ROOT\t\t\t\t%s\n" % config.ROOT)
     fp.writelines("DATA_DIR\t\t\t\t%s\n" % config.DATA_DIR)
     fp.writelines("experiment_dir\t\t\t\t%s\n" % config.experiment_dir)
     fp.writelines("config_path\t\t\t\t%s\n" % config.config_path)
@@ -82,8 +83,8 @@ def save_config():
     fp.writelines("checkpoint_diff\t\t\t\t%s\n" % config.checkpoint_diff)
     fp.writelines("epochs\t\t\t\t%d\n" % config.epochs)
     fp.writelines("batch_size\t\t\t\t%d\n" % config.batch_size)
-    fp.writelines("beta\t\t\t\t%d\n" % config.beta)
-    fp.writelines("lr\t\t\t\t%d\n" % config.lr)
+    fp.writelines("beta\t\t\t\t%f\n" % config.beta)
+    fp.writelines("lr\t\t\t\t%f\n" % config.lr)
     fp.writelines("lr_decay_freq\t\t\t\t%d\n" % config.lr_decay_freq)
     fp.writelines("iters_per_epoch\t\t\t\t%d\n" % config.iters_per_epoch)
     fp.writelines("log_freq\t\t\t\t%d\n" % config.log_freq)
@@ -203,7 +204,7 @@ def validation(val_loader, epoch, Hnet, Rnet, criterion):
         batch_time.update(time.time() - start_time)
         start_time = time.time()
 
-        val_log = 'Validation[%d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f\tbatch time: %.2f' % (
+        val_log = 'Validation[%02d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f\tbatch time: %.2f' % (
             epoch,
             Hlosses.val, Rlosses.val,
             Hdiff.val, Rdiff.val,
@@ -212,7 +213,7 @@ def validation(val_loader, epoch, Hnet, Rnet, criterion):
         if i % config.log_freq == 1:
             print(val_log)
 
-    val_log = 'Validation[%d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f\tbatch time: %.2f' % (
+    val_log = 'Validation[%02d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f\tbatch time: %.2f' % (
         epoch,
         Hlosses.avg, Rlosses.avg,
         Hdiff.avg, Rdiff.avg,
@@ -279,7 +280,7 @@ def train(train_loader, val_loader, Hnet, Rnet, optimizer, scheduler, criterion,
             batch_time.update(time.time() - start_time)
 
             start_time = time.time()
-            log = '[%d/%d] [%d/%d]\tH_loss: %.6f R_loss: %.6f H_diff: %.4f R_diff: %.4f\tdata_time: %.4f\tbatch_time: %.4f' % (
+            log = '[%02d/%d] [%03d/%d]\tH_loss: %.6f R_loss: %.6f H_diff: %.4f R_diff: %.4f\tdata_time: %.4f\tbatch_time: %.4f' % (
                 epoch, config.epochs, i, config.iters_per_epoch,
                 Hlosses.val, Rlosses.val, Hdiff.val, Rdiff.val,
                 data_time.val, batch_time.val
@@ -305,7 +306,7 @@ def train(train_loader, val_loader, Hnet, Rnet, optimizer, scheduler, criterion,
             epoch, i,
             config.train_pics_save_path
         )
-        epoch_log = "\nTraining Epoch[%d]\tHloss=%.6f\tRloss=%.6f\tHdiff=%.4f\tRdiff=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
+        epoch_log = "\nTraining Epoch[%02d]\tHloss=%.6f\tRloss=%.6f\tHdiff=%.4f\tRdiff=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch,
             Hlosses.avg, Rlosses.avg,
             Hdiff.avg, Rdiff.avg,

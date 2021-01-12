@@ -52,8 +52,8 @@ class UnetGenerator(nn.Module):
         norm_layer = get_norm_layer(norm_type)
         
         # construct unet structure (from inner to outer)
-        unet_block = UnetSkipConnectionBlock(nhf*8, nhf*8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)
-        for i in range(num_downs - 5):
+        unet_block = UnetSkipConnectionBlock(nhf*8, nhf*8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
+        for i in range(num_downs - 5):  # add intermediate layers with ngf * 8 filters
             # considering dropout
             unet_block = UnetSkipConnectionBlock(nhf*8, nhf*8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
         # gradually reduce the number of filters from nhf*8 to nhf
@@ -96,17 +96,17 @@ class UnetSkipConnectionBlock(nn.Module):
 
         self.outmost = outermost
         if type(norm_layer) == functools.partial:
-            use_bias = norm_layer.func == nn.InstanceNorm2d
+            use_bias = norm_layer.func != nn.BatchNorm2d
         else:
-            use_bias = norm_layer == nn.InstanceNorm2d
+            use_bias = norm_layer != nn.BatchNorm2d
         if input_nc is None:
-            input_nc = inner_nc
+            input_nc = outer_nc
         
         downconv = nn.Conv2d(input_nc, inner_nc, kernel_size=4, stride=2, padding=1, bias=use_bias)
-        downrelu = nn.LeakyReLU(0.2, True)  # after ConvTranspose2d 
+        downrelu = nn.LeakyReLU(0.2, True)  # after Conv2d 
         downnorm = norm_layer(inner_nc)
 
-        uprelu = nn.ReLU(True)  # after Conv2d
+        uprelu = nn.ReLU(True)  # after ConvTranspose2d
         upnorm = norm_layer(outer_nc)
 
         if outermost:
@@ -181,11 +181,11 @@ class RevealNet(nn.Module):
         self.norm4 = self.norm_layer(nrf*2)
         self.norm5 = self.norm_layer(nrf)
 
-        def forward(self, X):
-            X = self.relu(self.norm1(self.conv1(X)))
-            X = self.relu(self.norm2(self.conv2(X)))
-            X = self.relu(self.norm3(self.conv3(X)))
-            X = self.relu(self.norm4(self.conv4(X)))
-            X = self.relu(self.norm5(self.conv5(X)))
-            output = self.output(self.conv6(X))
-            return output
+    def forward(self, X):
+        X = self.relu(self.norm1(self.conv1(X)))
+        X = self.relu(self.norm2(self.conv2(X)))
+        X = self.relu(self.norm3(self.conv3(X)))
+        X = self.relu(self.norm4(self.conv4(X)))
+        X = self.relu(self.norm5(self.conv5(X)))
+        output = self.output(self.conv6(X))
+        return output

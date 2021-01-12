@@ -12,6 +12,11 @@ from networks import *
 
 
 def main():
+    if torch.cuda.is_available():
+        print("---- GPU ----")
+    else:
+        print("---- CPU ----")
+
     cudnn.benchmark = True  # speed up
     assert config.DATA_DIR
 
@@ -23,8 +28,6 @@ def main():
                 os.makedirs(config.train_pics_save_path)
             if not os.path.exists(config.val_pics_save_path):
                 os.makedirs(config.val_pics_save_path)
-            if not os.path.exists(config.log_path):
-                os.makedirs(config.log_path)
         else:
             pass
     except OSError:
@@ -33,8 +36,8 @@ def main():
     # save config
     save_config()
 
-    traindir = os.path.join(DATA_DIR, 'train')
-    valdir = os.path.join(DATA_DIR, 'val')
+    traindir = os.path.join(config.DATA_DIR, 'train')
+    valdir = os.path.join(config.DATA_DIR, 'val')
 
     assert config.image_size % 32 == 0
     transform = transforms.Compose([
