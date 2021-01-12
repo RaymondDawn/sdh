@@ -59,7 +59,7 @@ def print_network(net, log_path=config.log_path):
     for param in net.parameters():
         num_params += param.numel()
     print_log(str(net), log_path)
-    print_log('Total number of parameters: %d' % num_params, log_path)
+    print_log('Total number of parameters: %d\n' % num_params, log_path)
 
 
 def save_config():
@@ -183,7 +183,7 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
     
 
 def validation(val_loader, epoch, Hnet, Rnet, criterion):
-    print_log("\n#### validation begin ####")
+    print("\n#### validation begin ####")
     batch_size = config.batch_size
     # validation information
     Hlosses = AverageMeter()     # losses for hiding network
@@ -220,7 +220,7 @@ def validation(val_loader, epoch, Hnet, Rnet, criterion):
     )
     print_log(val_log)
 
-    print_log("#### validation end ####\n")
+    print("#### validation end ####\n")
     return Hlosses.avg, Rlosses.avg, Hdiff.avg, Rdiff.avg
 
 
@@ -242,7 +242,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
     #### training and update parameters ####
     MIN_LOSS = 0x3f3f3f3f
     h_losses_list, r_losses_list = [], []
-    print_log("######## TRAIN BEGIN ########")
+    print("######## TRAIN BEGIN ########")
     for epoch in range(config.epochs):
         adjust_learning_rate(optimizer, epoch)
         # must zip in epoch's iteration
@@ -311,7 +311,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             epoch, i,
             config.train_pics_save_path
         )
-        epoch_log = "\nTraining Epoch[%02d]\tHloss=%.6f\tRloss=%.6f\tHdiff=%.4f\tRdiff=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
+        epoch_log = "Training Epoch[%02d]\tHloss=%.6f\tRloss=%.6f\tHdiff=%.4f\tRdiff=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch,
             Hlosses.avg, Rlosses.avg,
             Hdiff.avg, Rdiff.avg,
@@ -334,7 +334,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         MIN_LOSS = min(MIN_LOSS, sum_diff)
 
         if is_best:
-            print_log("Save epoch%03d checkpoint" % epoch)
+            print_log("Save best checkpoint: epoch%03d\n" % epoch)
             save_checkpoint(
                 {
                     'epoch': epoch+1,
@@ -349,4 +349,6 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
                     val_hdiff, val_rdiff
                 )
             )
-    print_log("######## TRAIN END ########")
+        else:
+            print_log("\n")
+    print("######## TRAIN END ########")

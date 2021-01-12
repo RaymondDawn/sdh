@@ -8,7 +8,7 @@ image_size = 128
 training_dataset_size = 25000
 
 cur_time = time.strftime('%Y-%m-%d_%H-%M', time.localtime())
-ROOT = '/content/drive/My Drive'
+ROOT = '/content/drive/MyDrive'
 DATA_DIR = ROOT + '/dataset'
 experiment_dir = ROOT + '/sdh/exper_info/' + cur_time
 config_path = experiment_dir + "/config.txt"
@@ -22,7 +22,7 @@ test_pics_save_path = ''
 checkpoint = ''
 checkpoint_diff = ''
 
-epochs = 65
+epochs = 50
 batch_size = 50
 beta = 0.75
 lr = 0.001
