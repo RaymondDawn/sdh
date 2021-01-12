@@ -1,6 +1,7 @@
 import os
 import time
 import shutil
+import matplotlib.pyplot as plt
 import torch
 from torch import nn
 import torchvision.utils as vutils
@@ -76,6 +77,7 @@ def save_config():
     fp.writelines("log_path\t\t\t\t%s\n" % config.log_path)
     fp.writelines("checkpoint_path\t\t\t\t%s\n" % config.checkpoint_path)
     fp.writelines("train_pics_save_path\t\t\t\t%s\n" % config.train_pics_save_path)
+    fp.writelines("train_loss_save_path\t\t\t\t%s\n" % config.train_loss_save_path)
     fp.writelines("val_pics_save_path\t\t\t\t%s\n" % config.val_pics_save_path)
     fp.writelines("test_path\t\t\t\t%s\n" % config.test_path)
     fp.writelines("test_pics_save_path\t\t\t\t%s\n" % config.test_pics_save_path)
@@ -99,11 +101,13 @@ def save_config():
     fp.close()
 
 
-def save_checkpoint(state, is_best, epoch, prefix):
+def save_checkpoint(state, is_best, epoch, prefix, only_save_best=True):
     """Save checkpoint files for training"""
     filename = '%s/checkpoints_%03d.pth.tar' % (config.checkpoint_path, epoch)
+    if only_save_best:
+        filename = '%s/checkpoints_best.pth.tar' % (config.checkpoint_path)
     torch.save(state, filename)
-    if is_best:
+    if is_best and not only_save_best:
         shutil.copyfile(filename, '%s/best_checkpoint_%03d.pth.tar' % (config.checkpoint_path, epoch))
 
 
@@ -120,6 +124,17 @@ def save_result_pic(batch_size, cover, container, secret, rev_secret, epoch, i, 
     show_all = torch.cat((show_cover, show_secret), dim=0)
 
     vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=True)
+
+
+def save_loss_pic(h_losses_list, r_losses_list, save_path):
+    plt.title('Training Loss for H and R')
+    plt.xlabel('epoch')
+    plt.ylabel('MSE loss')
+    plt.plot(list(range(1, len(h_losses_list)+1)), h_losses_list, label='H loss')
+    plt.plot(list(range(1, len(r_losses_list)+1)), r_losses_list, label='R loss')
+    plt.legend()
+    plt.savefig(save_path)
+    plt.close()
 
 
 def adjust_learning_rate(optimizer, epoch):
@@ -168,10 +183,9 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
     
 
 def validation(val_loader, epoch, Hnet, Rnet, criterion):
-    print_log("#### validation begin ####")
+    print_log("\n#### validation begin ####")
     batch_size = config.batch_size
     # validation information
-    batch_time = AverageMeter()  # time for processing a batch
     Hlosses = AverageMeter()     # losses for hiding network
     Rlosses = AverageMeter()     # losses for reveal network
     SumLosses = AverageMeter()   # losses sumed by H and R with a factor beta(0.75 for default)
@@ -180,12 +194,10 @@ def validation(val_loader, epoch, Hnet, Rnet, criterion):
     # turn on val mode
     Hnet.eval()
     Rnet.eval()
-
-    start_time = time.time()
     
     for i, (secret_image, cover_image) in enumerate(val_loader, start=1):
         cover_image, container_image, secret_image, rev_secret_image, H_loss, R_loss, H_diff, R_diff \
-                = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent)
+                = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, config.cover_dependent)
             
         Hlosses.update(H_loss.item(), batch_size)
         Rlosses.update(R_loss.item(), batch_size)
@@ -200,63 +212,56 @@ def validation(val_loader, epoch, Hnet, Rnet, criterion):
                 epoch, i,
                 config.val_pics_save_path
             )
-        
-        batch_time.update(time.time() - start_time)
-        start_time = time.time()
 
-        val_log = 'Validation[%02d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f\tbatch time: %.2f' % (
-            epoch,
-            Hlosses.val, Rlosses.val,
-            Hdiff.val, Rdiff.val,
-            batch_time.val
-        )
-        if i % config.log_freq == 1:
-            print(val_log)
-
-    val_log = 'Validation[%02d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f\tbatch time: %.2f' % (
+    val_log = 'Validation[%02d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f' % (
         epoch,
         Hlosses.avg, Rlosses.avg,
         Hdiff.avg, Rdiff.avg,
-        batch_time.sum
     )
     print_log(val_log)
 
-    print_log("#### validation end ####")
+    print_log("#### validation end ####\n")
     return Hlosses.avg, Rlosses.avg, Hdiff.avg, Rdiff.avg
 
 
-def train(train_loader, val_loader, Hnet, Rnet, optimizer, scheduler, criterion, cover_dependent=False):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, optimizer, scheduler, criterion, cover_dependent=False):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
-        train_loader (zip)     -- zip object combined by secret and cover train_loader
-        val_loader (zip)       -- zip object combined by secret and cover val_loader
-        Hnet (nn.Module)       -- hiding network
-        Rnet (nn.Module)       -- reveal network
-        optimizer              -- optimizer for Hnet and Rnet
-        scheduler              -- scheduler for optimizer to set dynamic learning rate
-        criterion              -- loss function
-        cover_dependent (bool) -- DDH (dependent deep hiding) or UDH (universal deep hiding)
+        train_loader_secret     -- train_loader for secret images
+        train_loader_cover      -- train_loader for cover images
+        val_loader_secret       -- val_loader for secret images
+        val_loader_cover        -- val_loader for cover images
+        Hnet (nn.Module)        -- hiding network
+        Rnet (nn.Module)        -- reveal network
+        optimizer               -- optimizer for Hnet and Rnet
+        scheduler               -- scheduler for optimizer to set dynamic learning rate
+        criterion               -- loss function
+        cover_dependent (bool)  -- DDH (dependent deep hiding) or UDH (universal deep hiding)
     """
-    # training information
-    batch_time = AverageMeter()  # time for processing a batch
-    data_time = AverageMeter()   # time for reading data
-    Hlosses = AverageMeter()     # losses for hiding network
-    Rlosses = AverageMeter()     # losses for reveal network
-    SumLosses = AverageMeter()   # losses sumed by H and R with a factor beta(0.75 for default)
-    Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
-    Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
-    # turn on training mode
-    Hnet.train()
-    Rnet.train()
-
-    start_time = time.time()
-
     #### training and update parameters ####
     MIN_LOSS = 0x3f3f3f3f
+    h_losses_list, r_losses_list = [], []
     print_log("######## TRAIN BEGIN ########")
     for epoch in range(config.epochs):
         adjust_learning_rate(optimizer, epoch)
+        # must zip in epoch's iteration
+        train_loader = zip(train_loader_secret, train_loader_cover)
+        val_loader = zip(val_loader_secret, val_loader_cover)
+
+        # training information
+        batch_time = AverageMeter()  # time for processing a batch
+        data_time = AverageMeter()   # time for reading data
+        Hlosses = AverageMeter()     # losses for hiding network
+        Rlosses = AverageMeter()     # losses for reveal network
+        SumLosses = AverageMeter()   # losses sumed by H and R with a factor beta(0.75 for default)
+        Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
+        Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
+        # turn on training mode
+        Hnet.train()
+        Rnet.train()
+
+        start_time = time.time()
 
         for i, (secret_image, cover_image) in enumerate(train_loader, start=1):
             data_time.update(time.time() - start_time)
@@ -278,8 +283,8 @@ def train(train_loader, val_loader, Hnet, Rnet, optimizer, scheduler, criterion,
             optimizer.step()
 
             batch_time.update(time.time() - start_time)
-
             start_time = time.time()
+
             log = '[%02d/%d] [%03d/%d]\tH_loss: %.6f R_loss: %.6f H_diff: %.4f R_diff: %.4f\tdata_time: %.4f\tbatch_time: %.4f' % (
                 epoch, config.epochs, i, config.iters_per_epoch,
                 Hlosses.val, Rlosses.val, Hdiff.val, Rdiff.val,
@@ -315,6 +320,10 @@ def train(train_loader, val_loader, Hnet, Rnet, optimizer, scheduler, criterion,
         )
         print_log(epoch_log)
 
+        h_losses_list.append(Hlosses.avg)
+        r_losses_list.append(Rlosses.avg)
+        save_loss_pic(h_losses_list, r_losses_list, config.train_loss_save_path)
+
         #### validation, schedule learning rate and make checkpoint ####
         val_hloss, val_rloss, val_hdiff, val_rdiff = validation(val_loader, epoch, Hnet, Rnet, criterion)
 
@@ -324,18 +333,20 @@ def train(train_loader, val_loader, Hnet, Rnet, optimizer, scheduler, criterion,
         is_best = sum_diff < MIN_LOSS
         MIN_LOSS = min(MIN_LOSS, sum_diff)
 
-        save_checkpoint(
-            {
-                'epoch': epoch+1,
-                'H_state_dict': Hnet.state_dict(),
-                'R_state_dict': Rnet.state_dict(),
-                'optimizer': optimizer.state_dict()
-            },
-            is_best, epoch,
-            '%s/epoch_%d_Hloss_%.4f_Rloss%.4f_Hdiff%.4f_Rdiff%.4f' % (
-                config.checkpoint_path, epoch,
-                val_hloss, val_rloss,
-                val_hdiff, val_rdiff
+        if is_best:
+            print_log("Save epoch%03d checkpoint" % epoch)
+            save_checkpoint(
+                {
+                    'epoch': epoch+1,
+                    'H_state_dict': Hnet.state_dict(),
+                    'R_state_dict': Rnet.state_dict(),
+                    'optimizer': optimizer.state_dict()
+                },
+                is_best, epoch,
+                '%s/epoch_%d_Hloss_%.4f_Rloss%.4f_Hdiff%.4f_Rdiff%.4f' % (
+                    config.checkpoint_path, epoch,
+                    val_hloss, val_rloss,
+                    val_hdiff, val_rdiff
+                )
             )
-        )
     print_log("######## TRAIN END ########")

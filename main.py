@@ -129,11 +129,11 @@ def main():
             shuffle=True,
             num_workers=int(config.workers)
         )
-
-        train_loader = zip(train_loader_secret, train_loader_cover)
-        val_loader = zip(val_loader_secret, val_loader_cover)
+        
         train(
-            train_loader, val_loader,
+            # zip loader in train()
+            train_loader_secret, train_loader_cover,
+            val_loader_secret, val_loader_cover,
             Hnet, Rnet,
             optimizer, scheduler, criterion,
             cover_dependent=config.cover_dependent
