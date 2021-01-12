@@ -8,9 +8,9 @@ image_size = 128
 training_dataset_size = 25000
 
 cur_time = time.strftime('%Y-%m-%d_%H-%M', time.localtime())
-ROOT = '/content/drive/My Drive/temporary'
+ROOT = '/content/drive/My Drive'
 DATA_DIR = ROOT + '/dataset'
-experiment_dir = ROOT + '/exper_info/' + cur_time
+experiment_dir = ROOT + '/sdh/exper_info/' + cur_time
 config_path = experiment_dir + "/config.txt"
 log_path = experiment_dir + '/train_log.txt'
 checkpoint_path = experiment_dir + '/checkpoint'
