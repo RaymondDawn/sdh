@@ -13,13 +13,13 @@ DATA_DIR              = ROOT + '/dataset'
 experiment_dir        = ROOT + '/sdh/exper_info/' + exper_name
 config_path           = experiment_dir + "/config.txt"
 log_path              = experiment_dir + '/train_log.txt'
-checkpoint_path       = experiment_dir + '/checkpoint'
+checkpoint_save_path  = experiment_dir + '/checkpoint'
 train_pics_save_path  = experiment_dir + '/train_pics'
 train_loss_save_path  = experiment_dir + '/train_loss.png'
 val_pics_save_path    = experiment_dir + '/val_pics'
 test_pics_save_path   = experiment_dir + '/test_pics'
 checkpoint            = ''
-checkpoint_path       = checkpoint_path + checkpoint
+checkpoint_path       = checkpoint_save_path + checkpoint
 test                  = False
 
 epochs                = 50
