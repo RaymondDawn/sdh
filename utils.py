@@ -1,6 +1,7 @@
 import os
 import time
 import shutil
+import hashlib
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
@@ -26,6 +27,18 @@ class AverageMeter(object):
         self.sum += val*n
         self.count += n
         self.avg = self.sum / self.count
+
+
+def key_preprocess(key: str, algorithm='md5') -> torch.Tensor:
+    """Hash and binarize the key."""
+    if algorithm == 'md5':
+        hash_key = hashlib.md5(key.encode(encoding='UTF-8')).digest()
+    else:
+        raise NotImplementedError('hash algorithm [%s] is not found' % algorithm)
+    binary_key = ''.join(format(x, '08b') for x in hash_key)
+    tensor_key = torch.Tensor([float(x)/2 + 0.25 for x in binary_key])  # [0, 1] -> [0.25, 0.75]
+    
+    return tensor_key
 
 
 def weights_init(m):
@@ -69,29 +82,33 @@ def save_config():
     fp.writelines("workers\t\t\t\t%d\n" % config.workers)
     fp.writelines("image_size\t\t\t\t%d\n" % config.image_size)
     fp.writelines("training_dataset_size\t\t\t\t%d\n" % config.training_dataset_size)
-    fp.writelines("cur_time\t\t\t\t%s\n" % config.cur_time)
+    fp.writelines("exper_name\t\t\t\t%s\n" % config.exper_name)
     fp.writelines("ROOT\t\t\t\t%s\n" % config.ROOT)
     fp.writelines("DATA_DIR\t\t\t\t%s\n" % config.DATA_DIR)
     fp.writelines("experiment_dir\t\t\t\t%s\n" % config.experiment_dir)
     fp.writelines("config_path\t\t\t\t%s\n" % config.config_path)
     fp.writelines("log_path\t\t\t\t%s\n" % config.log_path)
-    fp.writelines("checkpoint_path\t\t\t\t%s\n" % config.checkpoint_path)
+    fp.writelines("checkpoint_save_path\t\t\t\t%s\n" % config.checkpoint_save_path)
     fp.writelines("train_pics_save_path\t\t\t\t%s\n" % config.train_pics_save_path)
     fp.writelines("train_loss_save_path\t\t\t\t%s\n" % config.train_loss_save_path)
     fp.writelines("val_pics_save_path\t\t\t\t%s\n" % config.val_pics_save_path)
-    fp.writelines("test_path\t\t\t\t%s\n" % config.test_path)
     fp.writelines("test_pics_save_path\t\t\t\t%s\n" % config.test_pics_save_path)
     fp.writelines("checkpoint\t\t\t\t%s\n" % config.checkpoint)
-    fp.writelines("checkpoint_diff\t\t\t\t%s\n" % config.checkpoint_diff)
+    fp.writelines("checkpoint_path\t\t\t\t%s\n" % config.checkpoint_path)
+    fp.writelines("test\t\t\t\t%s\n" % config.test)
     fp.writelines("epochs\t\t\t\t%d\n" % config.epochs)
     fp.writelines("batch_size\t\t\t\t%d\n" % config.batch_size)
     fp.writelines("beta\t\t\t\t%f\n" % config.beta)
+    fp.writelines("gamma\t\t\t\t%f\n" % config.gamma)
     fp.writelines("lr\t\t\t\t%f\n" % config.lr)
     fp.writelines("lr_decay_freq\t\t\t\t%d\n" % config.lr_decay_freq)
     fp.writelines("iters_per_epoch\t\t\t\t%d\n" % config.iters_per_epoch)
     fp.writelines("log_freq\t\t\t\t%d\n" % config.log_freq)
     fp.writelines("result_pic_freq\t\t\t\t%d\n" % config.result_pic_freq)
     fp.writelines("num_downs\t\t\t\t%d\n" % config.num_downs)
+    fp.writelines("key\t\t\t\t%s\n" % config.key)
+    fp.writelines("hash_algorithm\t\t\t\t%s\n" % config.hash_algorithm)
+    fp.writelines("key_redundance_size\t\t\t\t%s\n" % config.key_redundance_size)
     fp.writelines("cover_dependent\t\t\t\t%s\n" % config.cover_dependent)
     fp.writelines("channel_secret\t\t\t\t%d\n" % config.channel_secret)
     fp.writelines("channel_cover\t\t\t\t%d\n" % config.channel_cover)
@@ -101,37 +118,48 @@ def save_config():
     fp.close()
 
 
-def save_checkpoint(state, is_best, epoch, prefix, only_save_best=True):
-    """Save checkpoint files for training"""
-    filename = '%s/checkpoints_%03d.pth.tar' % (config.checkpoint_path, epoch)
-    if only_save_best:
-        filename = '%s/checkpoints_best.pth.tar' % (config.checkpoint_path)
+def save_checkpoint(state, is_best):
+    """Save checkpoint files for training."""
+    if is_best:  # best
+        filename = '%s/checkpoint_best.pth.tar' % (config.checkpoint_path)
+    else:  # newest
+        filename = '%s/checkpoint_newest.pth.tar' % (config.checkpoint_path)
     torch.save(state, filename)
-    if is_best and not only_save_best:
-        shutil.copyfile(filename, '%s/best_checkpoint_%03d.pth.tar' % (config.checkpoint_path, epoch))
+    
 
+def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret_, epoch, i, save_path):
+    """Save a batch of result pictures."""
+    if epoch is None:
+        result_name = '%s/result_pic_batch%04d.png' % (save_path, i)
+    else:
+        result_name = '%s/result_pic_epoch%03d_batch%04d.png' % (save_path, epoch, i)
 
-def save_result_pic(batch_size, cover, container, secret, rev_secret, epoch, i, save_path):
-    result_name = '%s/result_pic_epoch%03d_batch%04d.png' % (save_path, epoch, i)
-
-    cover_gap = container - cover
-    secret_gap = rev_secret - secret
-    cover_gap = (cover_gap*10 + 0.5).clamp_(0.0, 1.0)
-    secret_gap = (secret_gap*10 + 0.5).clamp_(0.0, 1.0)
+    # cover_gap = container - cover
+    # secret_gap = rev_secret - secret
+    # cover_gap = (cover_gap*10 + 0.5).clamp_(0.0, 1.0)
+    # secret_gap = (secret_gap*10 + 0.5).clamp_(0.0, 1.0)
+    cover_gap = (container - cover).abs()
+    secret_gap = (rev_secret - secret).abs()
 
     show_cover = torch.cat((cover, container, cover_gap), dim=0)
     show_secret = torch.cat((secret, rev_secret, secret_gap), dim=0)
-    show_all = torch.cat((show_cover, show_secret), dim=0)
+    if rev_secret_ is None:
+        show_all = torch.cat((show_cover, show_secret), dim=0)
+    else:
+        show_all = torch.cat((show_cover, show_secret, rev_secret_), dim=0)
 
     vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=True)
 
 
-def save_loss_pic(h_losses_list, r_losses_list, save_path):
+def save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, save_path):
+    """Save loss picture for Hnet and Rnet."""
     plt.title('Training Loss for H and R')
     plt.xlabel('epoch')
     plt.ylabel('MSE loss')
     plt.plot(list(range(1, len(h_losses_list)+1)), h_losses_list, label='H loss')
     plt.plot(list(range(1, len(r_losses_list)+1)), r_losses_list, label='R loss')
+    if len(r_losses_list_) != 0:
+        plt.plot(list(range(1, len(r_losses_list_)+1)), r_losses_list_, label='R loss (fake)')
     plt.legend()
     plt.savefig(save_path)
     plt.close()
@@ -144,7 +172,7 @@ def adjust_learning_rate(optimizer, epoch):
         param_group['lr'] = lr
 
 
-def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent=False):
+def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent, key):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -154,16 +182,19 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
         Rnet (nn.Module)            -- reveal network
         criterion                   -- loss function
         cover_dependent (bool)      -- DDH (dependent deep hiding) or UDH (universal deep hiding)
+        key (torch.Tensor)          -- secure key (`None` denotes no key)
     """
     cover_image = cover_image.cuda()
     secret_image = secret_image.cuda()
+    if key is not None:
+        key = key.cuda()
 
     if cover_dependent:
         H_input = torch.cat((cover_image, secret_image), dim=1)
     else:
         H_input = secret_image
 
-    H_output = Hnet(H_input)
+    H_output = Hnet(H_input, key)
 
     if cover_dependent:
         container_image = H_output
@@ -172,59 +203,72 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
 
     H_loss = criterion(container_image, cover_image)
 
-    rev_secret_image = Rnet(container_image)
+    rev_secret_image = Rnet(container_image, key)
     R_loss = criterion(rev_secret_image, secret_image)
+
+    if key is None:
+        rev_secret_image_, R_loss_, Rdiff_ = None, 0, 0
+    else:
+        fake_key = torch.Tensor([float(x)/2 + 0.25 for x in (torch.rand(len(key)) < 0.5)]).cuda()
+        rev_secret_image_ = Rnet(container_image, fake_key)
+        R_loss_ = criterion(rev_secret_image_, torch.zeros(rev_secret_image_.size(), device=rev_secret_image_.device))
+        R_diff_ = (rev_secret_image_).abs().mean() * 255
 
     # L1 metric (APD: average pixel difference)
     H_diff = (container_image - cover_image).abs().mean() * 255
     R_diff = (rev_secret_image - secret_image).abs().mean() * 255
 
-    return cover_image, container_image, secret_image, rev_secret_image, H_loss, R_loss, H_diff, R_diff
-    
+    return cover_image, container_image, secret_image, rev_secret_image, rev_secret_image_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
 
-def validation(val_loader, epoch, Hnet, Rnet, criterion):
+
+def validation(val_loader, val_Hnet, val_Rnet, criterion, cover_dependent, key):
     print("\n#### validation begin ####")
     batch_size = config.batch_size
     # validation information
-    Hlosses = AverageMeter()     # losses for hiding network
-    Rlosses = AverageMeter()     # losses for reveal network
-    SumLosses = AverageMeter()   # losses sumed by H and R with a factor beta(0.75 for default)
-    Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
-    Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
+    val_Hlosses = AverageMeter()     # losses for hiding network
+    val_Rlosses = AverageMeter()     # losses for reveal network
+    val_Rlosses_ = AverageMeter()    # losses for reveal network with fake key
+    val_Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
+    val_Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
+    val_Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeors)
+    
     # turn on val mode
     Hnet.eval()
     Rnet.eval()
     
-    for i, (secret_image, cover_image) in enumerate(val_loader, start=1):
-        cover_image, container_image, secret_image, rev_secret_image, H_loss, R_loss, H_diff, R_diff \
-                = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, config.cover_dependent)
-            
-        Hlosses.update(H_loss.item(), batch_size)
-        Rlosses.update(R_loss.item(), batch_size)
-        Hdiff.update(H_diff.item(), batch_size)
-        Rdiff.update(R_diff.item(), batch_size)
+    for j, (val_secret_image, val_cover_image) in enumerate(val_loader, start=1):
+        val_cover_image, val_container_image, val_secret_image, val_rev_secret_image, val_rev_secret_image_, val_H_loss, val_R_loss, val_R_loss_, val_H_diff, val_R_diff, val_R_diff_ \
+                = forward_pass(val_secret_image, val_cover_image, val_Hnet, val_Rnet, criterion, cover_dependent, key)
+        
+        val_Hlosses.update(val_H_loss.item(), batch_size)
+        val_Rlosses.update(val_R_loss.item(), batch_size)
+        val_Hdiff.update(val_H_diff.item(), batch_size)
+        val_Rdiff.update(val_R_diff.item(), batch_size)
 
-        if i == 1:
+        if key is not None:
+            val_Rlosses_.update(val_R_loss_.item(), batch_size)
+            val_Rdiff_.update(val_R_diff_.item(), batch_size)
+
+        if j == 1:
             save_result_pic(
                 batch_size,
-                cover_image, container_image,
-                secret_image, rev_secret_image,
-                epoch, i,
+                val_cover_image, val_container_image,
+                val_secret_image, val_rev_secret_image, val_rev_secret_image_,
+                epoch, j,
                 config.val_pics_save_path
             )
-
-    val_log = 'Validation[%02d] val_Hloss: %.6f val_Rloss: %.6f val_Hdiff:%.4f val_Rdiff: %.4f' % (
+    val_log = "Validation[%02d]\tval_Hloss: %.6f val_Rloss: %.6f val_Rloss_: %.6f val_Hdiff:%.4f val_Rdiff: %.4f val_Rdiff_: %.4f" % (
         epoch,
-        Hlosses.avg, Rlosses.avg,
-        Hdiff.avg, Rdiff.avg,
+        val_Hlosses.avg, val_Rlosses.avg, val_Rlosses_.avg,
+        val_Hdiff.avg, val_Rdiff.avg, val_Rdiff_.avg,
     )
     print_log(val_log)
 
     print("#### validation end ####\n")
-    return Hlosses.avg, Rlosses.avg, Hdiff.avg, Rdiff.avg
+    return val_Hlosses.avg, val_Rlosses.avg, val_Hdiff.avg, val_Rdiff.avg
 
 
-def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, optimizer, scheduler, criterion, cover_dependent=False):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, optimizer, scheduler, criterion, cover_dependent, key):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
@@ -238,10 +282,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         scheduler               -- scheduler for optimizer to set dynamic learning rate
         criterion               -- loss function
         cover_dependent (bool)  -- DDH (dependent deep hiding) or UDH (universal deep hiding)
+        key (torch.Tensor)      -- secure key (`None` denotes no key)
     """
     #### training and update parameters ####
-    MIN_LOSS = 0x3f3f3f3f
-    h_losses_list, r_losses_list = [], []
+    MIN_LOSS = float('inf')
+    h_losses_list, r_losses_list, r_losses_list_ = [], [], []
     print("######## TRAIN BEGIN ########")
     for epoch in range(config.epochs):
         adjust_learning_rate(optimizer, epoch)
@@ -254,9 +299,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         data_time = AverageMeter()   # time for reading data
         Hlosses = AverageMeter()     # losses for hiding network
         Rlosses = AverageMeter()     # losses for reveal network
+        Rlosses_ = AverageMeter()    # losses for reveal network with fake key
         SumLosses = AverageMeter()   # losses sumed by H and R with a factor beta(0.75 for default)
         Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
         Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
+        Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeors)
         # turn on training mode
         Hnet.train()
         Rnet.train()
@@ -267,15 +314,19 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             data_time.update(time.time() - start_time)
             batch_size = config.batch_size
 
-            cover_image, container_image, secret_image, rev_secret_image, H_loss, R_loss, H_diff, R_diff \
-                = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent)
+            cover_image, container_image, secret_image, rev_secret_image, rev_secret_image_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
+                = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent, key=key)
             
             Hlosses.update(H_loss.item(), batch_size)
             Rlosses.update(R_loss.item(), batch_size)
             Hdiff.update(H_diff.item(), batch_size)
             Rdiff.update(R_diff.item(), batch_size)
+            
+            if key is not None:
+                Rlosses_.update(R_loss_.item(), batch_size)
+                Rdiff_.update(R_diff_.item(), batch_size)
 
-            loss_sum = H_loss + config.beta * R_loss
+            loss_sum = H_loss + config.beta * R_loss + config.gamma * R_loss_
             SumLosses.update(loss_sum.item(), batch_size)
 
             optimizer.zero_grad()
@@ -285,9 +336,10 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_time.update(time.time() - start_time)
             start_time = time.time()
 
-            log = '[%02d/%d] [%03d/%d]\tH_loss: %.6f R_loss: %.6f H_diff: %.4f R_diff: %.4f\tdata_time: %.4f\tbatch_time: %.4f' % (
+            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tdata_time: %.4f batch_time: %.4f" % (
                 epoch, config.epochs, i, config.iters_per_epoch,
-                Hlosses.val, Rlosses.val, Hdiff.val, Rdiff.val,
+                Hlosses.val, Rlosses.val, Rlosses_.val,
+                Hdiff.val, Rdiff.val, Rdiff_.val,
                 data_time.val, batch_time.val
             )
 
@@ -296,8 +348,8 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             if epoch == 0 and i % config.result_pic_freq == 0:
                 save_result_pic(
                     batch_size,
-                    cover_image.detach(), container_image.detach(),
-                    secret_image.detach(), rev_secret_image.detach(),
+                    cover_image, container_image,
+                    secret_image, rev_secret_image, rev_secret_image_,
                     epoch, i,
                     config.train_pics_save_path
                 )
@@ -306,15 +358,15 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
 
         save_result_pic(
             batch_size,
-            cover_image.detach(), container_image.detach(),
-            secret_image.detach(), rev_secret_image.detach(),
+            cover_image, container_image,
+            secret_image, rev_secret_image, rev_secret_image_,
             epoch, i,
             config.train_pics_save_path
         )
-        epoch_log = "Training Epoch[%02d]\tHloss=%.6f\tRloss=%.6f\tHdiff=%.4f\tRdiff=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
+        epoch_log = "Training Epoch[%02d]\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch,
-            Hlosses.avg, Rlosses.avg,
-            Hdiff.avg, Rdiff.avg,
+            Hlosses.avg, Rlosses.avg, Rlosses_.avg,
+            Hdiff.avg, Rdiff.avg, Rdiff_.avg,
             optimizer.param_groups[0]['lr'],
             batch_time.sum
         )
@@ -322,33 +374,113 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
 
         h_losses_list.append(Hlosses.avg)
         r_losses_list.append(Rlosses.avg)
-        save_loss_pic(h_losses_list, r_losses_list, config.train_loss_save_path)
+        if key is not None:
+            r_losses_list_.append(Rlosses_.avg)
+        save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, config.train_loss_save_path)
+
+        print_log("Save the newest checkpoint: epoch%03d\n" % epoch)
+        save_checkpoint(
+            {
+                'epoch': epoch+1,
+                'H_state_dict': Hnet.state_dict(),
+                'R_state_dict': Rnet.state_dict(),
+                'optimizer': optimizer.state_dict()
+            }, is_best=False  # the newest
+        )
 
         #### validation, schedule learning rate and make checkpoint ####
-        val_hloss, val_rloss, val_hdiff, val_rdiff = validation(val_loader, epoch, Hnet, Rnet, criterion)
+        val_Hloss, val_Rloss, val_Hdiff, val_Rdiff = validation(val_loader, Hnet, Rnet, criterion, cover_dependent, key)
 
-        scheduler.step(val_rloss)
+        scheduler.step(val_Rloss)
 
-        sum_diff = val_hdiff + val_rdiff
+        sum_diff = val_Hdiff + val_Rdiff
         is_best = sum_diff < MIN_LOSS
         MIN_LOSS = min(MIN_LOSS, sum_diff)
 
         if is_best:
-            print_log("Save best checkpoint: epoch%03d\n" % epoch)
+            print_log("Save the best checkpoint: epoch%03d\n" % epoch)
             save_checkpoint(
                 {
                     'epoch': epoch+1,
                     'H_state_dict': Hnet.state_dict(),
                     'R_state_dict': Rnet.state_dict(),
                     'optimizer': optimizer.state_dict()
-                },
-                is_best, epoch,
-                '%s/epoch_%d_Hloss_%.4f_Rloss%.4f_Hdiff%.4f_Rdiff%.4f' % (
-                    config.checkpoint_path, epoch,
-                    val_hloss, val_rloss,
-                    val_hdiff, val_rdiff
-                )
+                }, is_best=True
+            )
+    print("######## TRAIN END ########")
+
+
+def test(test_loader, Hnet, Rnet, criterion, cover_dependent, save_path, save_num, key):
+    """Test the performance of Hnet and Rnet by checkpoint.
+
+    Parameters:
+        test_loader (zip)      -- test_loader for secret and cover images
+        Hnet (nn.Module)       -- hiding network
+        Rnet (nn.Module)       -- reveal network
+        criterion              -- loss function to quantify the performation
+        cover_dependent (bool) -- DDH (dependent deep hiding) or UDH (universal deep hiding)
+        save_path (str)        -- save path for result pictures
+        save_num (int)         -- the number of saved pictures
+        key (torch.Tensor)     -- secure key (`None` denotes no key)
+    """
+    print("\n#### test begin ####")
+    batch_size = config.batch_size
+    # test information
+    Hlosses = AverageMeter()     # losses for hiding network
+    Rlosses = AverageMeter()     # losses for reveal network
+    Rlosses_ = AverageMeter()    # losses for reveal network with fake key
+    Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
+    Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
+    Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeros)
+
+    # turn on val mode
+    Hnet.eval()
+    Rnet.eval()
+
+    for i, (secret_image, cover_image) in enumerate(test_loader, start=1):
+        cover_image = cover_image.cuda()
+        secret_image = secret_image.cuda()
+
+        if cover_dependent:
+            H_input = torch.cat((cover_image, secret_image), dim=1)
+        else:
+            H_input = secret_image
+
+        H_output = Hnet(H_input, key)
+
+        if cover_dependent:
+            container_image = H_output
+        else:
+            container_image = H_output + cover_image
+
+        H_loss = criterion(container_image, cover_image)
+
+        rev_secret_image = Rnet(container_image, key)
+        R_loss = criterion(rev_secret_image, secret_image)
+
+        if i <= save_num:
+            save_result_pic(
+                batch_size,
+                cover_image, container_image,
+                secret_image, rev_secret_image, rev_secret_=None,
+                epoch=None, i=i,
+                save_path=save_path
             )
         else:
-            print_log("\n")
-    print("######## TRAIN END ########")
+            break
+
+        H_diff = (container_image - cover_image).abs().mean() * 255
+        R_diff = (rev_secret_image - secret_image).abs().mean() * 255
+
+        Hlosses.update(H_loss.item(), batch_size)
+        Rlosses.update(R_loss.item(), batch_size)
+        Hdiff.update(H_diff.item(), batch_size)
+        Rdiff.update(R_diff.item(), batch_size)
+
+    test_log = 'Test\tHloss: %.6f\tRloss: %.6f\tHdiff: %.4f\tRdiff: %.4f' % (
+        Hlosses.avg, Rlosses.avg,
+        Hdiff.avg, Rdiff.avg
+    )
+    print(test_log)
+    # print_log(test_log)
+    print("#### test end ####\n")
