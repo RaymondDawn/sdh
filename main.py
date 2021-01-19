@@ -22,14 +22,16 @@ def main():
 
     try:
         if not config.test:
-            if not os.path.exists(config.checkpoint_path):
-                os.makedirs(config.checkpoint_path)
+            print("Making checkpoint, train_pics and val_pics dirs...")
+            if not os.path.exists(config.checkpoint_save_path):
+                os.makedirs(config.checkpoint_save_path)
             if not os.path.exists(config.train_pics_save_path):
                 os.makedirs(config.train_pics_save_path)
             if not os.path.exists(config.val_pics_save_path):
                 os.makedirs(config.val_pics_save_path)
             save_config()
         else:
+            print("Making test_pics dir...")
             if not os.path.exists(config.test_pics_save_path):
                 os.makedirs(config.test_pics_save_path)
     except OSError:
@@ -39,6 +41,7 @@ def main():
     if config.key is None:
         key, key_len, redundance_size = None, None, None
     else:
+        print("Preprocessing secure key...")
         key = key_preprocess(config.key, config.hash_algorithm)
         key_len, redundance_size = len(key), config.key_redundance_size
 
@@ -53,14 +56,17 @@ def main():
     ])
 
     if not config.test:
+        print("Making train and val datasets...")
         train_dataset_cover = ImageFolder(traindir, transform)
         train_dataset_secret = ImageFolder(traindir, transform)
         val_dataset_cover = ImageFolder(valdir, transform)
         val_dataset_secret = ImageFolder(valdir, transform)
     else:
+        print("Making test dataset...")
         test_dataset_cover = ImageFolder(testdir, transform)
         test_dataset_secret = ImageFolder(testdir, transform)
 
+    print("Constructing H and R networks...")
     if config.cover_dependent:
         Hnet = UnetGenerator(
             input_nc=config.channel_secret,
@@ -93,7 +99,8 @@ def main():
     Hnet = torch.nn.DataParallel(Hnet).cuda()
     Rnet = torch.nn.DataParallel(Rnet).cuda()
     if config.checkpoint != '':
-        checkpoint = torch.load(config.checkpoint)
+        print("Loading checkpoints for H and R...")
+        checkpoint = torch.load(config.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
         Rnet.load_state_dict(checkpoint['R_state_dict'])
 
@@ -110,6 +117,7 @@ def main():
         optimizer = optim.Adam(params, lr=config.lr, betas=(0.5, 0.999))
         scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=8, verbose=True)
 
+        print("Making train and val dataloaders...")
         train_loader_secret = DataLoader(
             train_dataset_secret,
             batch_size=config.batch_size,
@@ -145,10 +153,11 @@ def main():
             key=key
         )
     else:
+        print("Making test dataloader...")
         test_loader_secret = DataLoader(
             test_dataset_secret,
             batch_size=config.batch_size,
-            shuffle=True,
+            shuffle=False,  # do not shuffle secret image when in test mode
             num_workers=int(config.workers)
         )
         test_loader_cover = DataLoader(
@@ -163,8 +172,7 @@ def main():
             test_loader,
             Hnet, Rnet, criterion,
             cover_dependent=config.cover_dependent,
-            save_path=config.test_pics_save_path, save_num=4,
-            key=key
+            save_num=1, key=key, mode='test'
         )
 
 

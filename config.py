@@ -3,7 +3,7 @@ import torch
 
 
 ngpu                  = torch.cuda.device_count()
-workers               = 8
+workers               = ngpu * 4
 image_size            = 128
 training_dataset_size = 25000
 
@@ -33,7 +33,7 @@ iters_per_epoch       = training_dataset_size // batch_size
 log_freq              = 10
 result_pic_freq       = 100
 
-key                   = '(Hell0_World)<!@#$%^&*>'
+key                   = 'Hell0_World'
 hash_algorithm        = 'md5'
 key_redundance_size   = image_size // 8
 cover_dependent       = False
