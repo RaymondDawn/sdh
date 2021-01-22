@@ -2,6 +2,7 @@ import os
 import time
 import shutil
 import hashlib
+from PIL import Image
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
@@ -72,7 +73,7 @@ def print_network(net, log_path=config.log_path):
     for param in net.parameters():
         num_params += param.numel()
     print_log(str(net), log_path)
-    print_log('Total number of parameters: %d\n' % num_params, log_path)
+    print_log('Total number of parameters: %d\n' % num_params)
 
 
 def save_config():
@@ -105,7 +106,6 @@ def save_config():
     fp.writelines("iters_per_epoch\t\t\t\t%d\n" % config.iters_per_epoch)
     fp.writelines("log_freq\t\t\t\t%d\n" % config.log_freq)
     fp.writelines("result_pic_freq\t\t\t\t%d\n" % config.result_pic_freq)
-    fp.writelines("num_downs\t\t\t\t%d\n" % config.num_downs)
     fp.writelines("key\t\t\t\t%s\n" % config.key)
     fp.writelines("hash_algorithm\t\t\t\t%s\n" % config.hash_algorithm)
     fp.writelines("key_redundance_size\t\t\t\t%s\n" % config.key_redundance_size)
@@ -125,6 +125,19 @@ def save_checkpoint(state, is_best):
     else:  # newest
         filename = '%s/checkpoint_newest.pth.tar' % (config.checkpoint_save_path)
     torch.save(state, filename)
+
+
+def save_image(input_image, image_path):
+    """Save a batch torch.Tensor as an image to the disk."""
+    if isinstance(input_image, torch.Tensor):  # detach the tensor from current graph
+        image_tensor = input_image.detach()
+    else:
+        raise TypeError("Type of the input is neither `np.ndarray` nor `torch.Tensor`")
+    image_numpy = image_tensor[0].cpu().float().numpy()  # .numpy() will cause deviation on pixels  e.g. tensor(-0.5059) -> array(0.5058824)
+    image_numpy = np.round(np.transpose(image_numpy, (1, 2, 0)) * 255.0)  # [c, h, w] -> [h,w,c] & [0,1] -> [0,255]
+
+    image_pil = Image.fromarray(image_numpy.astype(np.uint8))
+    image_pil.save(image_path)
 
 
 def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret_, epoch, i, save_path):
@@ -210,7 +223,7 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
     if key is None:
         rev_secret_image_, R_loss_, R_diff_ = None, 0, 0
     else:
-        fake_key = torch.Tensor([float(x)/2 + 0.25 for x in (torch.rand(len(key)) < torch.rand(1))]).cuda()
+        fake_key = torch.Tensor([float(torch.randn(1)<0)/2 + 0.25 for _ in range(len(key))]).cuda()  # binary
         rev_secret_image_ = Rnet(container_image, fake_key)
         R_loss_ = criterion(rev_secret_image_, torch.zeros(rev_secret_image_.size(), device=rev_secret_image_.device))
         R_diff_ = (rev_secret_image_).abs().mean() * 255
@@ -317,8 +330,8 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             epoch, i,
             config.train_pics_save_path
         )
-        epoch_log = "Training Epoch[%02d]\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
-            epoch,
+        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
+            epoch, SumLosses.avg,
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
             Hdiff.avg, Rdiff.avg, Rdiff_.avg,
             optimizer.param_groups[0]['lr'],

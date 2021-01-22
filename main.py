@@ -38,7 +38,7 @@ def main():
         print("XXXXXXXX mkdir failed XXXXXXXX")
 
     # process secure key
-    if config.key is None:
+    if config.key is None or len(config.key) == 0:
         key, key_len, redundance_size = None, None, None
     else:
         print("Preprocessing secure key...")
@@ -170,8 +170,7 @@ def main():
         test_loader = zip(test_loader_secret, test_loader_cover)
         test(
             test_loader,
-            Hnet, Rnet, criterion,
-            cover_dependent=config.cover_dependent,
+            Hnet, Rnet, criterion, config.cover_dependent,
             save_num=1, key=key, mode='test'
         )
 
