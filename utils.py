@@ -433,7 +433,7 @@ def test(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num, key, mod
                 save_result_pic(
                     batch_size,
                     cover_image, container_image,
-                    secret_image, rev_secret_image, rev_secret_image,
+                    secret_image, rev_secret_image, rev_secret_image_,
                     epoch, i,
                     config.val_pics_save_path
                 )
