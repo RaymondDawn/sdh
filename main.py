@@ -94,7 +94,7 @@ def main():
     )
 
     Hnet.apply(weights_init)
-    # Rnet.apply(weights_init)  ## apply weights init in Rnet defination
+    Rnet.apply(weights_init)
 
     Hnet = torch.nn.DataParallel(Hnet).cuda()
     Rnet = torch.nn.DataParallel(Rnet).cuda()
