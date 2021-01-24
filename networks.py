@@ -161,9 +161,23 @@ class UnetSkipConnectionBlock(nn.Module):
                 b, c, h, w = x.size()
                 r = self.redundance_size
                 ke = self.encoder(k).view(1, c, r, r).repeat(b, 1, h//r, w//r)
-                return self.model(torch.cat([x, ke], dim=1))
+                return self.model(torch.cat((x, ke), dim=1))
         else:
-            return torch.cat([x, self.model(x)], dim=1)  # cat by channel
+            return torch.cat((x, self.model(x)), dim=1)  # cat by channel
+
+
+class ConvBNRelu(nn.Module):
+    """Building a sequence of Convolution, Batch Normalization and ReLU activation."""
+    def __init__(self, input_nc, output_nc, kernel_size=3, stride=1, padding=1):
+        super(ConvBNRelu, self).__init__()
+        self.layers = nn.Sequential(
+            nn.Conv2d(input_nc, output_nc, kernel_size, stride, padding),
+            nn.BatchNorm2d(output_nc, track_running_stats=False),
+            nn.ReLU(inplace=True)
+        )
+
+    def forward(self, X):
+        return self.layers(X)
 
 
 class RevealNet(nn.Module):
@@ -182,45 +196,40 @@ class RevealNet(nn.Module):
         """
         super(RevealNet, self).__init__()
         self.redundance_size = redundance_size
+        self.model = nn.Sequential()
         # input is (3) * 256 * 256
 
         if key_len is None:
-            self.conv1 = nn.Conv2d(input_nc, nrf, kernel_size=3, stride=1, padding=1)
+            self.model.add_module('CBR_layer1', ConvBNRelu(input_nc, nrf))
             self.encoder = None
         else:
-            self.conv1 = nn.Conv2d(input_nc*2, nrf, kernel_size=3, stride=1, padding=1)
+            self.model.add_module('CBR_layer1', ConvBNRelu(input_nc*2, nrf))
             self.encoder = nn.Linear(key_len, redundance_size**2 * input_nc)
 
-        self.conv2 = nn.Conv2d(nrf, nrf*2, kernel_size=3, stride=1, padding=1)
-        self.conv3 = nn.Conv2d(nrf*2, nrf*4, kernel_size=3, stride=1, padding=1)
-        self.conv4 = nn.Conv2d(nrf*4, nrf*2, kernel_size=3, stride=1, padding=1)
-        self.conv5 = nn.Conv2d(nrf*2, nrf, kernel_size=3, stride=1, padding=1)
-        self.conv6 = nn.Conv2d(nrf, output_nc, kernel_size=3, stride=1, padding=1)
+        self.model.add_module('CBR_layer2', ConvBNRelu(nrf, nrf*2))
+        self.model.add_module('CBR_layer3', ConvBNRelu(nrf*2, nrf*4))
+        self.model.add_module('CBR_layer4', ConvBNRelu(nrf*4, nrf*2))
+        self.model.add_module('CBR_layer5', ConvBNRelu(nrf*2, nrf))
+        self.model.add_module('Last_Conv', nn.Conv2d(nrf, output_nc, 3, 1, 1))
+
         if output_function == 'sigmoid':
-            self.output = nn.Sigmoid()
+            self.model.add_module('activation', nn.Sigmoid())
         else:
             raise NotImplementedError('activation funciton [%s] is not found' % output_function)
-        
-        self.relu = nn.ReLU(True)
 
-        self.norm_layer = get_norm_layer(norm_type)
-        self.norm1 = self.norm_layer(nrf)
-        self.norm2 = self.norm_layer(nrf*2)
-        self.norm3 = self.norm_layer(nrf*4)
-        self.norm4 = self.norm_layer(nrf*2)
-        self.norm5 = self.norm_layer(nrf)
+        # weights init
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+            elif isinstance(m, (nn.BatchNorm2d, nn.GroupNorm)):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
 
     def forward(self, X, k=None):
         if k is not None:
             b, c, h, w = X.size()
             r = self.redundance_size
             ke = self.encoder(k).view(1, c, r, r).repeat(b, 1, h//r, w//r)
-            X = torch.cat([X, ke], dim=1)
-        
-        X = self.relu(self.norm1(self.conv1(X)))
-        X = self.relu(self.norm2(self.conv2(X)))
-        X = self.relu(self.norm3(self.conv3(X)))
-        X = self.relu(self.norm4(self.conv4(X)))
-        X = self.relu(self.norm5(self.conv5(X)))
-        output = self.output(self.conv6(X))
-        return output
+            return self.model(torch.cat((X, ke), dim=1))
+        else:
+            return self.model(X)
