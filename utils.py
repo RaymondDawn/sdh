@@ -34,6 +34,10 @@ def key_preprocess(key: str, algorithm='md5') -> torch.Tensor:
     """Hash and binarize the key."""
     if algorithm == 'md5':
         hash_key = hashlib.md5(key.encode(encoding='UTF-8')).digest()
+    elif algorithm == 'sha256':
+        hash_key = hashlib.sha256(key.encode(encoding='UTF-8')).digest()
+    elif algorithm == 'sha512':
+        hash_key = hashlib.sha512(key.encode(encoding='UTF-8')).digest()
     else:
         raise NotImplementedError('hash algorithm [%s] is not found' % algorithm)
     binary_key = ''.join(format(x, '08b') for x in hash_key)
