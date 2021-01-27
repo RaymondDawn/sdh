@@ -7,7 +7,7 @@ workers               = ngpu * 4
 image_size            = 128
 training_dataset_size = 25000
 
-exper_name            = time.strftime('%Y-%m-%d_%H-%M', time.localtime())
+exper_name            = '2021-01-26_08-37'#time.strftime('%Y-%m-%d_%H-%M', time.localtime())
 ROOT                  = '/content/drive/MyDrive'
 DATA_DIR              = ROOT + '/dataset'
 experiment_dir        = ROOT + '/sdh/exper_info/' + exper_name
@@ -18,9 +18,9 @@ train_pics_save_path  = experiment_dir + '/train_pics'
 train_loss_save_path  = experiment_dir + '/train_loss.png'
 val_pics_save_path    = experiment_dir + '/val_pics'
 test_pics_save_path   = experiment_dir + '/test_pics'
-checkpoint            = ''
+checkpoint            = '/checkpoint_newest.pth.tar'
 checkpoint_path       = checkpoint_save_path + checkpoint
-test                  = False
+test                  = True
 
 epochs                = 50
 batch_size            = 25
