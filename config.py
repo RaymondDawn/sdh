@@ -7,7 +7,7 @@ workers               = ngpu * 4
 image_size            = 128
 training_dataset_size = 25000
 
-exper_name            = '2021-01-26_08-37'#time.strftime('%Y-%m-%d_%H-%M', time.localtime())
+exper_name            = time.strftime('%Y-%m-%d_%H-%M', time.localtime())
 ROOT                  = '/content/drive/MyDrive'
 DATA_DIR              = ROOT + '/dataset'
 experiment_dir        = ROOT + '/sdh/exper_info/' + exper_name
@@ -18,9 +18,9 @@ train_pics_save_path  = experiment_dir + '/train_pics'
 train_loss_save_path  = experiment_dir + '/train_loss.png'
 val_pics_save_path    = experiment_dir + '/val_pics'
 test_pics_save_path   = experiment_dir + '/test_pics'
-checkpoint            = '/checkpoint_newest.pth.tar'
+checkpoint            = ''
 checkpoint_path       = checkpoint_save_path + checkpoint
-test                  = True
+test                  = False
 
 epochs                = 50
 batch_size            = 25
@@ -35,7 +35,7 @@ result_pic_freq       = 100
 
 key                   = 'Hell0_World'
 hash_algorithm        = 'md5'
-key_redundance_size   = image_size // 8
+key_redundance_size   = image_size // 2
 cover_dependent       = False
 channel_secret        = 3
 channel_cover         = 3
