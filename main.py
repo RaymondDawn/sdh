@@ -69,7 +69,7 @@ def main():
     print("Constructing H and R networks...")
     if config.cover_dependent:
         Hnet = UnetGenerator(
-            input_nc=config.channel_secret,
+            input_nc=config.channel_cover+config.channel_secret,
             output_nc=config.channel_cover,
             num_downs=config.num_downs,
             norm_type=config.norm_type,
