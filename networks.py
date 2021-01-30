@@ -2,10 +2,7 @@ import functools
 import torch
 from torch import nn
 
-
-class Identity(nn.Module):
-    def forward(self, x):
-        return x
+from noise_layers import *
 
 
 def get_norm_layer(norm_type='batch'):
@@ -224,3 +221,24 @@ class RevealNet(nn.Module):
         X = self.relu(self.norm5(self.conv5(X)))
         output = self.output(self.conv6(X))
         return output
+
+
+class AttackNet(nn.Module):
+    """Create a Attack network, i.e. noise layers."""
+    def __init__(self):
+        super(AttackNet, self).__init__()
+        self.identity = Identity()
+        self.gaussian_noise = GaussianNoise()
+        self.gaussian_blur = GaussianBlur()
+        self.resize = Resize()
+        self.jpeg = DiffJPEG()
+
+    def forward(self, X):
+        b, _, _, _ = X.shape
+        X_identity = self.identity(X[: b//5])
+        X_gaussian_noise = self.gaussian_noise(X[b//5 : 2*b//5])
+        X_gaussian_blur = self.gaussian_blur(X[2*b//5 : 3*b//5])
+        X_resize = self.resize(X[3*b//5 : 4*b//5])
+        X_jpeg = self.jpeg(X[4*b//5 :])
+
+        return torch.cat((X_identity, X_gaussian_noise, X_gaussian_blur, X_resize, X_jpeg), dim=0)

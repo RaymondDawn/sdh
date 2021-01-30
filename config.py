@@ -33,9 +33,10 @@ iters_per_epoch       = training_dataset_size // batch_size
 log_freq              = 10
 result_pic_freq       = 100
 
+noise                 = False
 key                   = 'Hell0_World'
 hash_algorithm        = 'md5'
-key_redundance_size   = image_size // 2
+key_redundance_size   = image_size // 8
 cover_dependent       = False
 channel_secret        = 3
 channel_cover         = 3

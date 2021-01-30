@@ -92,12 +92,17 @@ def main():
         output_function='sigmoid',
         key_len=key_len, redundance_size=redundance_size
     )
+    if config.noise:
+        Anet = AttackNet()
+    else:
+        Anet = Identity()
 
     Hnet.apply(weights_init)
     Rnet.apply(weights_init)
 
     Hnet = torch.nn.DataParallel(Hnet).cuda()
     Rnet = torch.nn.DataParallel(Rnet).cuda()
+    Anet = torch.nn.DataParallel(Anet).cuda()
     if config.checkpoint != '':
         print("Loading checkpoints for H and R...")
         checkpoint = torch.load(config.checkpoint_path)
@@ -147,7 +152,7 @@ def main():
             # zip loader in train()
             train_loader_secret, train_loader_cover,
             val_loader_secret, val_loader_cover,
-            Hnet, Rnet,
+            Hnet, Rnet, Anet,
             optimizer, scheduler, criterion,
             cover_dependent=config.cover_dependent,
             key=key
@@ -170,7 +175,7 @@ def main():
         test_loader = zip(test_loader_secret, test_loader_cover)
         test(
             test_loader,
-            Hnet, Rnet, criterion, config.cover_dependent,
+            Hnet, Rnet, Anet, criterion, config.cover_dependent,
             save_num=1, key=key, mode='test'
         )
 

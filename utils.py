@@ -190,7 +190,7 @@ def adjust_learning_rate(optimizer, epoch):
         param_group['lr'] = lr
 
 
-def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent, key):
+def forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_dependent, key):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -198,6 +198,7 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
         cover_image (torch.Tensor)  -- cover images in batch
         Hnet (nn.Module)            -- hiding network
         Rnet (nn.Module)            -- reveal network
+        Anet (nn.Module)            -- attack network, i.e. noise layers
         criterion                   -- loss function
         cover_dependent (bool)      -- DDH (dependent deep hiding) or UDH (universal deep hiding)
         key (torch.Tensor)          -- secure key (`None` denotes no key)
@@ -221,6 +222,8 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
 
     H_loss = criterion(container_image, cover_image)
 
+    container_image = Anet(container_image)
+
     rev_secret_image = Rnet(container_image, key)
     R_loss = criterion(rev_secret_image, secret_image)
 
@@ -239,7 +242,7 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_depende
     return cover_image, container_image, secret_image, rev_secret_image, rev_secret_image_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
 
 
-def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, optimizer, scheduler, criterion, cover_dependent, key):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, Anet, optimizer, scheduler, criterion, cover_dependent, key):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
@@ -249,6 +252,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         val_loader_cover        -- val_loader for cover images
         Hnet (nn.Module)        -- hiding network
         Rnet (nn.Module)        -- reveal network
+        Anet (nn.Module)        -- attack network, i.e. noise layers
         optimizer               -- optimizer for Hnet and Rnet
         scheduler               -- scheduler for optimizer to set dynamic learning rate
         criterion               -- loss function
@@ -286,7 +290,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_size = config.batch_size
 
             cover_image, container_image, secret_image, rev_secret_image, rev_secret_image_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-                = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent, key)
+                = forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_dependent, key)
             
             Hlosses.update(H_loss.item(), batch_size)
             Rlosses.update(R_loss.item(), batch_size)
@@ -350,7 +354,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, config.train_loss_save_path)
 
         val_hloss, val_rloss, val_rloss_, val_hdiff, val_rdiff, val_rdiff_ \
-            = test(val_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, key=key, mode='val', epoch=epoch)
+            = test(val_loader, Hnet, Rnet, Anet, criterion, cover_dependent, save_num=1, key=key, mode='val', epoch=epoch)
 
         scheduler.step(val_rloss)
 
@@ -381,13 +385,14 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
     print("######## TRAIN END ########")
 
 
-def test(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num, key, mode, epoch=None):
+def test(data_loader, Hnet, Rnet, Anet, criterion, cover_dependent, save_num, key, mode, epoch=None):
     """Validate or test the performance of Hnet and Rnet.
 
     Parameters:
         data_loader (zip)      -- data_loader for secret and cover images
         Hnet (nn.Module)       -- hiding network
         Rnet (nn.Module)       -- reveal network
+        Anet (nn.Module)       -- attack network, i.e. noise layers
         criterion              -- loss function to quantify the performation
         cover_dependent (bool) -- DDH (dependent deep hiding) or UDH (universal deep hiding)
         save_num (int)         -- the number of saved pictures
@@ -413,7 +418,7 @@ def test(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num, key, mod
 
     for i, (secret_image, cover_image) in enumerate(data_loader, start=1):
         cover_image, container_image, secret_image, rev_secret_image, rev_secret_image_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret_image, cover_image, Hnet, Rnet, criterion, cover_dependent, key)
+            = forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_dependent, key)
 
         Hlosses.update(H_loss.item(), batch_size)
         Rlosses.update(R_loss.item(), batch_size)
