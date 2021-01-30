@@ -9,6 +9,7 @@ from jpeg_utils import *
 class Identity(nn.Module):
     def __init__(self):
         super(Identity, self).__init__()
+    
     def forward(self, x):
         return x
 
@@ -17,6 +18,7 @@ class GaussianNoise(nn.Module):
     def __init__(self, mean=0.0, var=0.01):
         super(GaussianNoise, self).__init__()
         self.mean, self.var = mean, var
+    
     def forward(self, x):
         noise_x = None
         x = x.cpu().detach().numpy().transpose((0, 2, 3, 1))
@@ -35,6 +37,7 @@ class GaussianBlur(nn.Module):
     def __init__(self, size=3):
         super(GaussianBlur, self).__init__()
         self.size = size
+    
     def forward(self, x):
         noise_x = None
         x = x.cpu().detach().numpy().transpose((0, 2, 3, 1))
@@ -53,6 +56,7 @@ class Resize(nn.Module):
     def __init__(self, reh=64, rew=64):
         super(Resize, self).__init__()
         self.reh, self.rew = reh, rew
+    
     def forward(self, x):
         b, c, h, w = x.shape
         x = x.cpu().detach().numpy().transpose((0, 2, 3, 1))
@@ -77,6 +81,7 @@ class DiffJPEG(nn.Module):
         factor = quality_to_factor(quality)
         self.compress = compress_jpeg(rounding=rounding, factor=factor)
         self.decompress = decompress_jpeg(h, w, rounding=rounding, factor=factor)
+    
     def forward(self, x):
         y, cb, cr = self.compress(x)
         return self.decompress(y, cb, cr)
