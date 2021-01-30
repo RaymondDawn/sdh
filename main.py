@@ -117,6 +117,7 @@ def main():
     if not config.test:
         print_network(Hnet)
         print_network(Rnet)
+        print_network(Anet)
 
         params = list(Hnet.parameters()) + list (Rnet.parameters())
         optimizer = optim.Adam(params, lr=config.lr, betas=(0.5, 0.999))
