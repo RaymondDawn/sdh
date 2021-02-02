@@ -132,12 +132,17 @@ def save_checkpoint(state, is_best):
 
 
 def save_image(input_image, image_path):
-    """Save a batch torch.Tensor as an image to the disk."""
+    """Save a 3D or 4D torch.Tensor as an image to the disk."""
     if isinstance(input_image, torch.Tensor):  # detach the tensor from current graph
         image_tensor = input_image.detach()
     else:
         raise TypeError("Type of the input is neither `np.ndarray` nor `torch.Tensor`")
-    image_numpy = image_tensor[0].cpu().float().numpy()  # .numpy() will cause deviation on pixels  e.g. tensor(-0.5059) -> array(0.5058824)
+    if len(image_tensor.shape) == 4:
+        image_numpy = image_tensor[0].cpu().float().numpy()  # .numpy() will cause deviation on pixels  e.g. tensor(-0.5059) -> array(0.5058824)
+    elif len(image_tensor.shape) == 3:
+        image_numpy = image_tensor.cpu().float().numpy()
+    else:
+        raise TypeError('input_image should be 3D or 4D, but get a [%d]D tensor' % len(image_tensor.shape))
     image_numpy = np.round(np.transpose(image_numpy, (1, 2, 0)) * 255.0)  # [c, h, w] -> [h,w,c] & [0,1] -> [0,255]
 
     image_pil = Image.fromarray(image_numpy.astype(np.uint8))
