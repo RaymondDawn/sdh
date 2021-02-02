@@ -15,7 +15,7 @@ class Identity(nn.Module):
 
 
 class GaussianNoise(nn.Module):
-    def __init__(self, mean=0.0, var=0.01):
+    def __init__(self, mean=0.0, var=0.0001):
         super(GaussianNoise, self).__init__()
         self.mean, self.var = mean, var
     
@@ -53,7 +53,7 @@ class GaussianBlur(nn.Module):
 
 
 class Resize(nn.Module):
-    def __init__(self, reh=64, rew=64):
+    def __init__(self, reh=100, rew=100):
         super(Resize, self).__init__()
         self.reh, self.rew = reh, rew
     
