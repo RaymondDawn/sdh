@@ -7,20 +7,27 @@ workers               = ngpu * 4
 image_size            = 128
 training_dataset_size = 25000
 
+analysis              = False
+test                  = False
+
 exper_name            = time.strftime('%Y-%m-%d_%H-%M', time.localtime())
 ROOT                  = '/content/drive/MyDrive'
 DATA_DIR              = ROOT + '/dataset'
 experiment_dir        = ROOT + '/sdh/exper_info/' + exper_name
-config_path           = experiment_dir + "/config.txt"
-log_path              = experiment_dir + '/train_log.txt'
+if not analysis:
+    config_path       = experiment_dir + '/config.txt'
+    log_path          = experiment_dir + '/log.txt'
+else:
+    config_path       = experiment_dir + '/analysis/config.txt'
+    log_path          = experiment_dir + '/analysis/log.txt'
 checkpoint_save_path  = experiment_dir + '/checkpoint'
 train_pics_save_path  = experiment_dir + '/train_pics'
 train_loss_save_path  = experiment_dir + '/train_loss.png'
 val_pics_save_path    = experiment_dir + '/val_pics'
 test_pics_save_path   = experiment_dir + '/test_pics'
+anal_pics_save_path   = experiment_dir + '/analysis/pics'
 checkpoint            = ''
 checkpoint_path       = checkpoint_save_path + checkpoint
-test                  = False
 
 epochs                = 50
 batch_size            = 25
@@ -33,7 +40,7 @@ iters_per_epoch       = training_dataset_size // batch_size
 log_freq              = 10
 result_pic_freq       = 100
 
-noise                 = True
+noise                 = False
 key                   = 'Hell0_World'
 hash_algorithm        = 'md5'
 key_redundance_size   = image_size // 8

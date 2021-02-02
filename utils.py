@@ -4,9 +4,13 @@ import shutil
 import hashlib
 from PIL import Image
 import matplotlib.pyplot as plt
+import numpy as np
 import torch
 from torch import nn
 import torchvision.utils as vutils
+
+from skimage.metrics import peak_signal_noise_ratio as _PSNR
+from skimage.metrics import structural_similarity as _SSIM
 
 import config
 from image_folder import ImageFolder
@@ -87,6 +91,10 @@ def save_config():
     fp.writelines("workers\t\t\t\t%d\n" % config.workers)
     fp.writelines("image_size\t\t\t\t%d\n" % config.image_size)
     fp.writelines("training_dataset_size\t\t\t\t%d\n" % config.training_dataset_size)
+    
+    fp.writelines("analysis\t\t\t\t%s\n" % config.analysis)
+    fp.writelines("test\t\t\t\t%s\n" % config.test)
+
     fp.writelines("exper_name\t\t\t\t%s\n" % config.exper_name)
     fp.writelines("ROOT\t\t\t\t%s\n" % config.ROOT)
     fp.writelines("DATA_DIR\t\t\t\t%s\n" % config.DATA_DIR)
@@ -98,9 +106,10 @@ def save_config():
     fp.writelines("train_loss_save_path\t\t\t\t%s\n" % config.train_loss_save_path)
     fp.writelines("val_pics_save_path\t\t\t\t%s\n" % config.val_pics_save_path)
     fp.writelines("test_pics_save_path\t\t\t\t%s\n" % config.test_pics_save_path)
+    fp.writelines("anal_pics_save_path\t\t\t\t%s\n" % config.anal_pics_save_path)
     fp.writelines("checkpoint\t\t\t\t%s\n" % config.checkpoint)
     fp.writelines("checkpoint_path\t\t\t\t%s\n" % config.checkpoint_path)
-    fp.writelines("test\t\t\t\t%s\n" % config.test)
+    
     fp.writelines("epochs\t\t\t\t%d\n" % config.epochs)
     fp.writelines("batch_size\t\t\t\t%d\n" % config.batch_size)
     fp.writelines("beta\t\t\t\t%f\n" % config.beta)
@@ -108,8 +117,11 @@ def save_config():
     fp.writelines("lr\t\t\t\t%f\n" % config.lr)
     fp.writelines("lr_decay_freq\t\t\t\t%d\n" % config.lr_decay_freq)
     fp.writelines("iters_per_epoch\t\t\t\t%d\n" % config.iters_per_epoch)
+    
     fp.writelines("log_freq\t\t\t\t%d\n" % config.log_freq)
     fp.writelines("result_pic_freq\t\t\t\t%d\n" % config.result_pic_freq)
+    
+    fp.writelines("noise\t\t\t\t%s\n" % config.noise)
     fp.writelines("key\t\t\t\t%s\n" % config.key)
     fp.writelines("hash_algorithm\t\t\t\t%s\n" % config.hash_algorithm)
     fp.writelines("key_redundance_size\t\t\t\t%s\n" % config.key_redundance_size)
@@ -132,25 +144,30 @@ def save_checkpoint(state, is_best):
 
 
 def save_image(input_image, image_path):
-    """Save a 3D or 4D torch.Tensor as an image to the disk."""
+    """Save a 3D or 4D torch.Tensor as an image (first image for a batch) to the disk."""
+    save_path, _ = os.path.split(image_path)
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    
     if isinstance(input_image, torch.Tensor):  # detach the tensor from current graph
         image_tensor = input_image.detach()
     else:
-        raise TypeError("Type of the input is neither `np.ndarray` nor `torch.Tensor`")
-    if len(image_tensor.shape) == 4:
-        image_numpy = image_tensor[0].cpu().float().numpy()  # .numpy() will cause deviation on pixels  e.g. tensor(-0.5059) -> array(0.5058824)
-    elif len(image_tensor.shape) == 3:
-        image_numpy = image_tensor.cpu().float().numpy()
-    else:
+        raise TypeError("Type of the input should be `torch.Tensor`")
+    if image_tensor.dim() == 4:
+        image_tensor = image_tensor[0]
+    elif image_tensor.dim() != 3:
         raise TypeError('input_image should be 3D or 4D, but get a [%d]D tensor' % len(image_tensor.shape))
-    image_numpy = np.round(np.transpose(image_numpy, (1, 2, 0)) * 255.0)  # [c, h, w] -> [h,w,c] & [0,1] -> [0,255]
-
-    image_pil = Image.fromarray(image_numpy.astype(np.uint8))
+    
+    image_numpy = image_tensor.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()  # add 0.5 after unnormalizing to [0, 255] to round to nearest integer
+    image_pil = Image.fromarray(image_numpy)
     image_pil.save(image_path)
 
 
 def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret_, epoch, i, save_path):
     """Save a batch of result pictures."""
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    
     if epoch is None:
         result_name = '%s/result_pic_batch%04d.png' % (save_path, i)
     else:
@@ -160,8 +177,6 @@ def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret
     secret_gap = rev_secret - secret
     cover_gap = (cover_gap*10 + 0.5).clamp_(0.0, 1.0)
     secret_gap = (secret_gap*10 + 0.5).clamp_(0.0, 1.0)
-    # cover_gap = (container - cover).abs() * 10
-    # secret_gap = (rev_secret - secret).abs() * 10
 
     show_cover = torch.cat((cover, container, cover_gap), dim=0)
     show_secret = torch.cat((secret, rev_secret, secret_gap), dim=0)
@@ -170,8 +185,7 @@ def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret
     else:
         show_all = torch.cat((show_cover, show_secret, rev_secret_), dim=0)
 
-    vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=True)
-    # vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
+    vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
 
 
 def save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, save_path):
@@ -186,6 +200,48 @@ def save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, save_path):
     plt.legend()
     plt.savefig(save_path)
     plt.close()
+
+
+def PSNR(batch_image0, batch_image1):
+    """PSNR batch version for two tensors."""
+    if isinstance(batch_image0, torch.Tensor) and isinstance(batch_image1, torch.Tensor):  # detach the tensor from current graph
+        batch_image0_tensor = batch_image0.detach()
+        batch_image1_tensor = batch_image1.detach()
+    else:
+        raise TypeError("Type of the input should be `torch.Tensor`")
+    assert batch_image0_tensor.shape == batch_image1_tensor.shape
+    
+    SUM, b = 0, batch_image0_tensor.shape[0]
+    for i in range(b):
+        image0_numpy = batch_image0_tensor[i].cpu().float().numpy()
+        image0_numpy = np.round(np.transpose(image0_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
+        
+        image1_numpy = batch_image1_tensor[i].cpu().float().numpy()
+        image1_numpy = np.round(np.transpose(image1_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
+
+        SUM += _PSNR(image0_numpy, image1_numpy)
+    return SUM / b
+
+
+def SSIM(batch_image0, batch_image1):
+    """SSIM batch version for two tensors."""
+    if isinstance(batch_image0, torch.Tensor) and isinstance(batch_image1, torch.Tensor):  # detach the tensor from current graph
+        batch_image0_tensor = batch_image0.detach()
+        batch_image1_tensor = batch_image1.detach()
+    else:
+        raise TypeError("Type of the input should be `torch.Tensor`")
+    assert batch_image0_tensor.shape == batch_image1_tensor.shape
+    
+    SUM, b = 0, batch_image0_tensor.shape[0]
+    for i in range(b):
+        image0_numpy = batch_image0_tensor[i].cpu().float().numpy()
+        image0_numpy = np.round(np.transpose(image0_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
+        
+        image1_numpy = batch_image1_tensor[i].cpu().float().numpy()
+        image1_numpy = np.round(np.transpose(image1_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
+
+        SUM += _SSIM(image0_numpy, image1_numpy, multichannel=True)
+    return SUM / b
 
 
 def adjust_learning_rate(optimizer, epoch):
