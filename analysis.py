@@ -23,7 +23,7 @@ def main():
 
     try:
         print("Makeing analysis dir...")
-        analdir = config.experiment_dir + '/analysis'
+        analdir = config.experiment_dir + '/analysis/%s' % config.checkpoint_mode
         if not os.path.exists(analdir):
             os.makedirs(analdir)
         save_config()
@@ -77,7 +77,7 @@ def main():
         key_len=key_len, redundance_size=redundance_size
     )
     if config.noise:
-        Anet = AttackNet()
+        Anet = AttackNet(noise_type=config.noise_type)
     else:
         Anet = Identity()
 
@@ -141,7 +141,8 @@ def main():
 
         cover_image, container_image = cover_image.detach().cpu(), container_image.detach().cpu()
         secret_image, rev_secret_image = secret_image.detach().cpu(), rev_secret_image.detach().cpu()
-        rev_secret_image_ = rev_secret_image_.detach().cpu()
+        if key is not None:
+            rev_secret_image_ = rev_secret_image_.detach().cpu()
 
         h_psnr = PSNR(cover_image, container_image)
         r_psnr = PSNR(secret_image, rev_secret_image)

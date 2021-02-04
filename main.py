@@ -93,7 +93,7 @@ def main():
         key_len=key_len, redundance_size=redundance_size
     )
     if config.noise:
-        Anet = AttackNet()
+        Anet = AttackNet(noise_type=config.noise_type)
     else:
         Anet = Identity()
 

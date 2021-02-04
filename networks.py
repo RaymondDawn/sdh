@@ -225,8 +225,9 @@ class RevealNet(nn.Module):
 
 class AttackNet(nn.Module):
     """Create a Attack network, i.e. noise layers."""
-    def __init__(self):
+    def __init__(self, noise_type):
         super(AttackNet, self).__init__()
+        self.noise_type = noise_type
         self.identity = Identity()
         self.gaussian_noise = GaussianNoise()
         self.gaussian_blur = GaussianBlur()
@@ -235,10 +236,23 @@ class AttackNet(nn.Module):
 
     def forward(self, X):
         b, _, _, _ = X.shape
-        X_identity = self.identity(X[: b//5])
-        X_gaussian_noise = self.gaussian_noise(X[b//5 : 2*b//5])
-        X_gaussian_blur = self.gaussian_blur(X[2*b//5 : 3*b//5])
-        X_resize = self.resize(X[3*b//5 : 4*b//5])
-        X_jpeg = self.jpeg(X[4*b//5 :])
-
-        return torch.cat((X_identity, X_gaussian_noise, X_gaussian_blur, X_resize, X_jpeg), dim=0)
+        if self.noise_type == 'combine':
+            X_identity = self.identity(X[: b//5])
+            X_gaussian_noise = self.gaussian_noise(X[b//5 : 2*b//5])
+            X_gaussian_blur = self.gaussian_blur(X[2*b//5 : 3*b//5])
+            X_resize = self.resize(X[3*b//5 : 4*b//5])
+            X_jpeg = self.jpeg(X[4*b//5 :])
+            return torch.cat((X_identity, X_gaussian_noise, X_gaussian_blur, X_resize, X_jpeg), dim=0)
+        else:
+            X_identity = self.identity(X[: 2*b//5])
+            if self.noise_type == 'noise':
+                X_noise = self.gaussian_noise(X[2*b//5 :])
+            elif self.noise_type == 'blur':
+                X_noise = self.gaussian_blur(X[2*b//5 :])
+            elif self.noise_type == 'resize':
+                X_noise = self.resize(X[2*b//5 :])
+            elif self.noise_type == 'jpeg':
+                X_noise = self.jpeg(X[2*b//5 :])
+            else:
+                NotImplementedError('noise type [%s] is not found' % self.noise_type)
+            return torch.cat((X_identity, X_noise), dim=0)

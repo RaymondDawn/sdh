@@ -96,6 +96,7 @@ def save_config():
     fp.writelines("test\t\t\t\t%s\n" % config.test)
 
     fp.writelines("exper_name\t\t\t\t%s\n" % config.exper_name)
+    fp.writelines("checkpoint_mode\t\t\t\t%s\n" % config.checkpoint_mode)
     fp.writelines("ROOT\t\t\t\t%s\n" % config.ROOT)
     fp.writelines("DATA_DIR\t\t\t\t%s\n" % config.DATA_DIR)
     fp.writelines("experiment_dir\t\t\t\t%s\n" % config.experiment_dir)
