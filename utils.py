@@ -1,6 +1,5 @@
 import os
 import time
-import shutil
 import hashlib
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -42,10 +41,12 @@ def key_preprocess(key: str, algorithm='md5') -> torch.Tensor:
         hash_key = hashlib.sha256(key.encode(encoding='UTF-8')).digest()
     elif algorithm == 'sha512':
         hash_key = hashlib.sha512(key.encode(encoding='UTF-8')).digest()
+    elif algorithm == 'none':
+        hash_key = key.encode(encoding='UTF-8')
     else:
         raise NotImplementedError('hash algorithm [%s] is not found' % algorithm)
     binary_key = ''.join(format(x, '08b') for x in hash_key)
-    tensor_key = torch.Tensor([float(x) for x in binary_key])
+    tensor_key = torch.Tensor([float(x)/2 + 0.25 for x in binary_key])  # [0, 1] -> [0.25, 0.75]
     
     return tensor_key
 
@@ -144,24 +145,39 @@ def save_checkpoint(state, is_best):
     torch.save(state, filename)
 
 
-def save_image(input_image, image_path):
-    """Save a 3D or 4D torch.Tensor as an image (first image for a batch) to the disk."""
-    save_path, _ = os.path.split(image_path)
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+def save_image(input_image, image_path, save_all=False, start=0):
+    """Save a 3D or 4D torch.Tensor as image(s) to the disk."""
+    if not save_all:
+        save_path, _ = os.path.split(image_path)
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
+    else:
+        save_path = image_path
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
     
     if isinstance(input_image, torch.Tensor):  # detach the tensor from current graph
         image_tensor = input_image.detach()
     else:
         raise TypeError("Type of the input should be `torch.Tensor`")
-    if image_tensor.dim() == 4:
-        image_tensor = image_tensor[0]
-    elif image_tensor.dim() != 3:
-        raise TypeError('input_image should be 3D or 4D, but get a [%d]D tensor' % len(image_tensor.shape))
     
-    image_numpy = image_tensor.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()  # add 0.5 after unnormalizing to [0, 255] to round to nearest integer
-    image_pil = Image.fromarray(image_numpy)
-    image_pil.save(image_path)
+    if not save_all:
+        if image_tensor.dim() == 4:
+            image_tensor = image_tensor[0]
+        elif image_tensor.dim() != 3:
+            raise TypeError('input_image should be 3D or 4D, but get a [%d]D tensor' % len(image_tensor.shape))
+        
+        image_numpy = image_tensor.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()  # add 0.5 after unnormalizing to [0, 255] to round to nearest integer
+        image_pil = Image.fromarray(image_numpy)
+        image_pil.save(image_path)
+    else:
+        if image_tensor.dim() != 4:
+            raise TypeError('input_image should be 4D if set `save_all` to True, but get a [%d]D tensor' % len(image_tensor.shape))
+        for i in range(image_tensor.shape[0]):
+            image_tensor_ = image_tensor[i]
+            image_numpy = image_tensor_.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()  # add 0.5 after unnormalizing to [0, 255] to round to nearest integer
+            image_pil = Image.fromarray(image_numpy)
+            image_pil.save(image_path + '/%d.png' % (i+start))
 
 
 def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret_, epoch, i, save_path):
@@ -184,7 +200,7 @@ def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret
     if rev_secret_ is None:
         show_all = torch.cat((show_cover, show_secret), dim=0)
     else:
-        show_all = torch.cat((show_cover, show_secret, rev_secret_), dim=0)
+        show_all = torch.cat((show_cover, show_secret, (rev_secret_*50).clamp_(0.0, 1.0)), dim=0)
 
     vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
 
@@ -214,11 +230,8 @@ def PSNR(batch_image0, batch_image1):
     
     SUM, b = 0, batch_image0_tensor.shape[0]
     for i in range(b):
-        image0_numpy = batch_image0_tensor[i].cpu().float().numpy()
-        image0_numpy = np.round(np.transpose(image0_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
-        
-        image1_numpy = batch_image1_tensor[i].cpu().float().numpy()
-        image1_numpy = np.round(np.transpose(image1_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
+        image0_numpy = batch_image0_tensor[i].mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+        image1_numpy = batch_image1_tensor[i].mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
 
         SUM += _PSNR(image0_numpy, image1_numpy)
     return SUM / b
@@ -235,11 +248,8 @@ def SSIM(batch_image0, batch_image1):
     
     SUM, b = 0, batch_image0_tensor.shape[0]
     for i in range(b):
-        image0_numpy = batch_image0_tensor[i].cpu().float().numpy()
-        image0_numpy = np.round(np.transpose(image0_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
-        
-        image1_numpy = batch_image1_tensor[i].cpu().float().numpy()
-        image1_numpy = np.round(np.transpose(image1_numpy, (1, 2, 0)) * 255.0).astype(np.uint8)
+        image0_numpy = batch_image0_tensor[i].mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+        image1_numpy = batch_image1_tensor[i].mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
 
         SUM += _SSIM(image0_numpy, image1_numpy, multichannel=True)
     return SUM / b
@@ -292,7 +302,7 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_d
     if key is None:
         rev_secret_image_, R_loss_, R_diff_ = None, 0, 0
     else:
-        fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(len(key))]).cuda()  # binary
+        fake_key = torch.Tensor([float(torch.randn(1)<0)/2 + 0.25 for _ in range(len(key))]).cuda()  # binary
         rev_secret_image_ = Rnet(container_image, fake_key)
         R_loss_ = criterion(rev_secret_image_, torch.zeros(rev_secret_image_.size(), device=rev_secret_image_.device))
         R_diff_ = (rev_secret_image_).abs().mean() * 255
