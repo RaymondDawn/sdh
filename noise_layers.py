@@ -15,7 +15,7 @@ class Identity(nn.Module):
 
 
 class GaussianNoise(nn.Module):
-    def __init__(self, mean=0.0, var=0.0001):
+    def __init__(self, mean=0.0, var=0.0025):
         super(GaussianNoise, self).__init__()
         self.mean, self.var = mean, var
     
