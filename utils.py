@@ -1,5 +1,6 @@
 import os
 import time
+import copy
 import hashlib
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -296,7 +297,17 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_d
 
     container_image = Anet(container_image)
 
-    rev_secret_image = Rnet(container_image, key)
+    # modify key
+    bits = 0  # do not modify
+    key_ = copy.deepcopy(key)
+    for i in range(bits):
+        index = (i + int(np.random.rand() * 128)) % 128
+        if key_[index] == 0.25:
+            key_[index] = 0.75
+        else:
+            key_[index] = 0.25
+
+    rev_secret_image = Rnet(container_image, key_)
     R_loss = criterion(rev_secret_image, secret_image)
 
     if key is None:
