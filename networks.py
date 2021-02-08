@@ -244,15 +244,14 @@ class AttackNet(nn.Module):
             X_jpeg = self.jpeg(X[4*b//5 :])
             return torch.cat((X_identity, X_gaussian_noise, X_gaussian_blur, X_resize, X_jpeg), dim=0)
         else:
-            X_identity = self.identity(X[: 2*b//5])
             if self.noise_type == 'noise':
-                X_noise = self.gaussian_noise(X[2*b//5 :])
+                X_noise = self.gaussian_noise(X)
             elif self.noise_type == 'blur':
-                X_noise = self.gaussian_blur(X[2*b//5 :])
+                X_noise = self.gaussian_blur(X)
             elif self.noise_type == 'resize':
-                X_noise = self.resize(X[2*b//5 :])
+                X_noise = self.resize(X)
             elif self.noise_type == 'jpeg':
-                X_noise = self.jpeg(X[2*b//5 :])
+                X_noise = self.jpeg(X)
             else:
                 NotImplementedError('noise type [%s] is not found' % self.noise_type)
-            return torch.cat((X_identity, X_noise), dim=0)
+            return X_noise
