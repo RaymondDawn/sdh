@@ -47,7 +47,7 @@ def key_preprocess(key: str, algorithm='md5') -> torch.Tensor:
     else:
         raise NotImplementedError('hash algorithm [%s] is not found' % algorithm)
     binary_key = ''.join(format(x, '08b') for x in hash_key)
-    tensor_key = torch.Tensor([float(x)/2 + 0.25 for x in binary_key])  # [0, 1] -> [0.25, 0.75]
+    tensor_key = torch.Tensor([float(x) for x in binary_key])
     
     return tensor_key
 
@@ -298,14 +298,14 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_d
     container_image = Anet(container_image)
 
     # modify key
-    bits = 0  # do not modify
+    bits = 0  # bits=0: do not modify
     key_ = copy.deepcopy(key)
     for i in range(bits):
         index = (i + int(np.random.rand() * 128)) % 128
-        if key_[index] == 0.25:
-            key_[index] = 0.75
+        if key_[index] == 0:
+            key_[index] = 1
         else:
-            key_[index] = 0.25
+            key_[index] = 0
 
     rev_secret_image = Rnet(container_image, key_)
     R_loss = criterion(rev_secret_image, secret_image)
@@ -313,7 +313,7 @@ def forward_pass(secret_image, cover_image, Hnet, Rnet, Anet, criterion, cover_d
     if key is None:
         rev_secret_image_, R_loss_, R_diff_ = None, 0, 0
     else:
-        fake_key = torch.Tensor([float(torch.randn(1)<0)/2 + 0.25 for _ in range(len(key))]).cuda()  # binary
+        fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(len(key))]).cuda()  # binary
         rev_secret_image_ = Rnet(container_image, fake_key)
         R_loss_ = criterion(rev_secret_image_, torch.zeros(rev_secret_image_.size(), device=rev_secret_image_.device))
         R_diff_ = (rev_secret_image_).abs().mean() * 255
