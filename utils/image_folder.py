@@ -37,7 +37,7 @@ class ImageFolder(data.Dataset):
     """A modified ImageFolder class.
     
     Modified by the official PyTorch ImageFolder class (https://github.com/pytorch/vision/blob/master/torchvision/datasets/folder.py)
-    so that this class can load images from both current directory and its subdirectories.
+    so that this class can load images from BOTH current directory AND its subdirectories.
     """
     def __init__(self, root, transform=None, return_paths=False, loader=default_loader):
         images = make_dataset(root)

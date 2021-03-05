@@ -2,8 +2,6 @@ import functools
 import torch
 from torch import nn
 
-from noise_layers import *
-
 
 def get_norm_layer(norm_type='batch'):
     """Return a normalization layer.
@@ -15,8 +13,9 @@ def get_norm_layer(norm_type='batch'):
     For InstanceNorm, we do not use learnable affine parameters. We do not track running statistics.
     Usually, `batch` is much better than `instance` and `none` but keeps much memory.
     """
-    # functools.partial uses to fix some attrs
+    # functools.partial used to fix some attrs
     if norm_type == 'batch':
+        # `track_running_stats=False` for unstable training in hiding and reveal tasks
         norm_layer = functools.partial(nn.BatchNorm2d, affine=True, track_running_stats=False)
     elif norm_type == 'instance':
         norm_layer = functools.partial(nn.InstanceNorm2d, affine=False, track_running_stats=False)
@@ -27,9 +26,17 @@ def get_norm_layer(norm_type='batch'):
     return norm_layer
 
 
+class Identity(nn.Module):
+    def __init__(self):
+        super(Identity, self).__init__()
+    
+    def forward(self, x):
+        return x
+
+
 class UnetGenerator(nn.Module):
     """Create a Unet-based hiding network."""
-    def __init__(self, input_nc, output_nc, num_downs, nhf=64, norm_type='none', use_dropout=False, output_function='sigmoid', key_len=None, redundance_size=None):
+    def __init__(self, input_nc, output_nc, num_downs=5, nhf=64, norm_type='batch', use_dropout=False, output_function='tanh'):
         """Construct a Unet generator.
 
         Parameters:
@@ -41,17 +48,16 @@ class UnetGenerator(nn.Module):
             norm_type (str)       -- normalization layer type
             use_dropout (bool)    -- if use dropout layers
             output_function (str) -- activation function for the outmost layer [sigmoid | tanh]
-            key_len (int)         -- length of secure key (`None` denotes no key)
-            redundance_size (int) -- redundance size for secure key by a fully connected layer
 
         We construct the U-Net from the innermost layer to the outermost layer.
         It is a recursive process.
         """
         super(UnetGenerator, self).__init__()
         norm_layer = get_norm_layer(norm_type)
-        
-        # construct unet structure (from inner to outer)
-        unet_block = UnetSkipConnectionBlock(nhf*8, nhf*8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)  # add the innermost layer
+
+        # construct u-net strcture (from inner to outer)
+        # add the innermost layer; nhf: number of filters in the last conv layer of hiding network
+        unet_block = UnetSkipConnectionBlock(nhf*8, nhf*8, input_nc=None, submodule=None, norm_layer=norm_layer, innermost=True)
         for i in range(num_downs - 5):  # add intermediate layers with ngf * 8 filters
             # considering dropout
             unet_block = UnetSkipConnectionBlock(nhf*8, nhf*8, input_nc=None, submodule=unet_block, norm_layer=norm_layer, use_dropout=use_dropout)
@@ -59,7 +65,7 @@ class UnetGenerator(nn.Module):
         unet_block = UnetSkipConnectionBlock(nhf*4, nhf*8, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock(nhf*2, nhf*4, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
         unet_block = UnetSkipConnectionBlock(nhf, nhf*2, input_nc=None, submodule=unet_block, norm_layer=norm_layer)
-        self.model = UnetSkipConnectionBlock(output_nc, nhf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer, output_function=output_function, key_len=key_len, redundance_size=redundance_size)
+        self.model = UnetSkipConnectionBlock(output_nc, nhf, input_nc=input_nc, submodule=unet_block, outermost=True, norm_layer=norm_layer, output_function=output_function)
 
         if output_function == 'tanh':
             self.factor = 10 / 255  # by referencing the engineering choice in universal adversarial perturbations
@@ -68,14 +74,13 @@ class UnetGenerator(nn.Module):
         else:
             raise NotImplementedError('activation funciton [%s] is not found' % output_function)
 
-    def forward(self, X, k=None):
-        """standard forward."""
-        return self.factor * self.model(X, k)
+    def forward(self, X):
+        return self.factor * self.model(X)
 
 
 class UnetSkipConnectionBlock(nn.Module):
     """Define the Unet submodule with skip connection."""
-    def __init__(self, outer_nc, inner_nc, input_nc=None, submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False, output_function='sigmoid', key_len=None, redundance_size=None):
+    def __init__(self, outer_nc, inner_nc, input_nc=None, submodule=None, outermost=False, innermost=False, norm_layer=nn.BatchNorm2d, use_dropout=False, output_function='tanh'):
         """Construct a Unet submodule with skip connection.
         
         Parameters:
@@ -88,15 +93,12 @@ class UnetSkipConnectionBlock(nn.Module):
             norm_layer                          -- normalization layer
             use_dropout (bool)                  -- if use dropout layers
             output_function (str)               -- activation function for the outmost layer [sigmoid | tanh]
-            key_len (int)                       -- length of secure key (`None` denotes no key)
-            redundance_size (int)               -- redundance size for secure key by a fully connected layer
         """
         super(UnetSkipConnectionBlock, self).__init__()
-        # `submodulde` is None if and only if this block is an innermost block
-        # `input_nc` is None if and only if this block is not an outermost block
+        # `submodulde` is None <=> this block is an innermost block
+        # `input_nc` is not None <=> this block is an outermost block
 
         self.outmost = outermost
-        self.redundance_size = redundance_size
 
         if type(norm_layer) == functools.partial:
             use_bias = norm_layer.func != nn.BatchNorm2d
@@ -104,25 +106,16 @@ class UnetSkipConnectionBlock(nn.Module):
             use_bias = norm_layer != nn.BatchNorm2d
         if input_nc is None:
             input_nc = outer_nc
-        
-        if key_len is None:
-            downconv = nn.Conv2d(input_nc, inner_nc, kernel_size=4, stride=2, padding=1, bias=use_bias)
-            self.encoder = None
-        else:
-            assert outermost
-            downconv = nn.Conv2d(input_nc*2, inner_nc, kernel_size=4, stride=2, padding=1, bias=use_bias)
-            self.encoder = nn.Linear(key_len, redundance_size**2 * input_nc)
-        
-        downrelu = nn.LeakyReLU(0.2, True)  # after Conv2d 
+
+        downconv = nn.Conv2d(input_nc, inner_nc, kernel_size=4, stride=2, padding=1, bias=use_bias)
+        downrelu = nn.LeakyReLU(0.2, True)  # after Conv2d
         downnorm = norm_layer(inner_nc)
 
         uprelu = nn.ReLU(True)  # after ConvTranspose2d
         upnorm = norm_layer(outer_nc)
 
         if outermost:
-            # no dropout
-            # no relu in down
-            # no normalization in down and up
+            # no dropout; no relu in down; no norm in down & up
             upconv = nn.ConvTranspose2d(inner_nc*2, outer_nc, kernel_size=4, stride=2, padding=1)
             down = [downconv]
             if output_function == 'tanh':
@@ -133,8 +126,7 @@ class UnetSkipConnectionBlock(nn.Module):
                 raise NotImplementedError('activation funciton [%s] is not found' % output_function)
             model = down + [submodule] + up
         elif innermost:
-            # no dropout
-            # no normalization in down
+            # no dropout; no norm in down
             upconv = nn.ConvTranspose2d(inner_nc, outer_nc, kernel_size=4, stride=2, padding=1, bias=use_bias)
             down = [downrelu, downconv]
             up = [uprelu, upconv, upnorm]
@@ -150,22 +142,16 @@ class UnetSkipConnectionBlock(nn.Module):
         
         self.model = nn.Sequential(*model)
 
-    def forward(self, x, k=None):
+    def forward(self, x):
         if self.outmost:
-            if k is None:
-                return self.model(x)
-            else:
-                b, c, h, w = x.size()
-                r = self.redundance_size
-                ke = self.encoder(k).view(1, c, r, r).repeat(b, 1, h//r, w//r)
-                return self.model(torch.cat((x, ke), dim=1))
+            return self.model(x)
         else:
             return torch.cat((x, self.model(x)), dim=1)  # cat by channel
 
 
 class RevealNet(nn.Module):
     """Create a cnn-based reveal network."""
-    def __init__(self, input_nc, output_nc, nrf=64, norm_type='none', output_function='sigmoid', key_len=None, redundance_size=None):
+    def __init__(self, input_nc, output_nc, nrf=64, norm_type='batch', output_function='sigmoid'):
         """Construct a reveal network.
         
         Parameters:
@@ -174,20 +160,12 @@ class RevealNet(nn.Module):
             nrf (int)             -- the number of filters in the last conv layer
             norm_type (str)       -- normalization layer type
             output_function (str) -- activation function for the last layer [sigmoid]
-            key_len (int)         -- length of secure key (`None` denotes no key)
-            redundance_size (int) -- redundance size for secure key by a fully connected layer
         """
         super(RevealNet, self).__init__()
-        self.redundance_size = redundance_size
         # input is (3) * 256 * 256
 
-        if key_len is None:
-            self.conv1 = nn.Conv2d(input_nc, nrf, kernel_size=3, stride=1, padding=1)
-            self.encoder = None
-        else:
-            self.conv1 = nn.Conv2d(input_nc*2, nrf, kernel_size=3, stride=1, padding=1)
-            self.encoder = nn.Linear(key_len, redundance_size**2 * input_nc)
-
+        # nrf: number of filters in the first/last conv layer of reveal network
+        self.conv1 = nn.Conv2d(input_nc, nrf, kernel_size=3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(nrf, nrf*2, kernel_size=3, stride=1, padding=1)
         self.conv3 = nn.Conv2d(nrf*2, nrf*4, kernel_size=3, stride=1, padding=1)
         self.conv4 = nn.Conv2d(nrf*4, nrf*2, kernel_size=3, stride=1, padding=1)
@@ -207,13 +185,7 @@ class RevealNet(nn.Module):
         self.norm4 = self.norm_layer(nrf*2)
         self.norm5 = self.norm_layer(nrf)
 
-    def forward(self, X, k=None):
-        if k is not None:
-            b, c, h, w = X.size()
-            r = self.redundance_size
-            ke = self.encoder(k).view(1, c, r, r).repeat(b, 1, h//r, w//r)
-            X = torch.cat((X, ke), dim=1)
-        
+    def forward(self, X):
         X = self.relu(self.norm1(self.conv1(X)))
         X = self.relu(self.norm2(self.conv2(X)))
         X = self.relu(self.norm3(self.conv3(X)))
@@ -221,37 +193,3 @@ class RevealNet(nn.Module):
         X = self.relu(self.norm5(self.conv5(X)))
         output = self.output(self.conv6(X))
         return output
-
-
-class AttackNet(nn.Module):
-    """Create a Attack network, i.e. noise layers."""
-    def __init__(self, noise_type):
-        super(AttackNet, self).__init__()
-        self.noise_type = noise_type
-        self.identity = Identity()
-        self.gaussian_noise = GaussianNoise()
-        self.gaussian_blur = GaussianBlur()
-        self.resize = Resize()
-        self.jpeg = DiffJPEG()
-
-    def forward(self, X):
-        b, _, _, _ = X.shape
-        if self.noise_type == 'combine':
-            X_identity = self.identity(X[: b//5])
-            X_gaussian_noise = self.gaussian_noise(X[b//5 : 2*b//5])
-            X_gaussian_blur = self.gaussian_blur(X[2*b//5 : 3*b//5])
-            X_resize = self.resize(X[3*b//5 : 4*b//5])
-            X_jpeg = self.jpeg(X[4*b//5 :])
-            return torch.cat((X_identity, X_gaussian_noise, X_gaussian_blur, X_resize, X_jpeg), dim=0)
-        else:
-            if self.noise_type == 'noise':
-                X_noise = self.gaussian_noise(X)
-            elif self.noise_type == 'blur':
-                X_noise = self.gaussian_blur(X)
-            elif self.noise_type == 'resize':
-                X_noise = self.resize(X)
-            elif self.noise_type == 'jpeg':
-                X_noise = self.jpeg(X)
-            else:
-                NotImplementedError('noise type [%s] is not found' % self.noise_type)
-            return X_noise
