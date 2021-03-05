@@ -351,7 +351,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
                     cover, container,
                     secret, rev_secret, rev_secret_,
                     epoch, i,
-                    opt.train_pics_save_path
+                    opt.train_pics_save_dir
                 )
             if i == opt.iters_per_epoch:
                 break
@@ -361,7 +361,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             cover, container,
             secret, rev_secret, rev_secret_,
             epoch, i,
-            opt.train_pics_save_path
+            opt.train_pics_save_dir
         )
         epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch, SumLosses.avg,
@@ -456,7 +456,7 @@ def inference(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, m
                     cover, container,
                     secret, rev_secret, rev_secret_,
                     epoch=None, i=i,  # epoch is None in test mode
-                    save_path=opt.test_pics_save_path
+                    save_path=opt.test_pics_save_dir
                 )
             else:
                 save_result_pic(
@@ -464,7 +464,7 @@ def inference(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, m
                     cover, container,
                     secret, rev_secret, rev_secret_,
                     epoch, i,
-                    opt.val_pics_save_path
+                    opt.val_pics_save_dir
                 )
 
     if mode == 'test':
