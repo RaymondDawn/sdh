@@ -71,8 +71,8 @@ def print_network(net, save_path=opt.options_path):
     num_params = 0
     for param in net.parameters():
         num_params += param.numel()
-    print_log(str(net), save_path)
-    print_log('Total number of parameters: %d\n' % num_params, save_path)
+    print_log(str(net), save_path, console=False)
+    print_log('Total number of parameters: %d\n' % num_params, save_path, console=False)
 
 
 def save_options(save_path=opt.options_path):
@@ -84,7 +84,7 @@ def save_options(save_path=opt.options_path):
         if v != default:
             comment = '\t[default: %s]' % str(default)
         message += '{:>25}: {:<30}{}\n'.format(str(k), str(v), comment)
-    print_log(message, save_path)
+    print_log(message, save_path, console=False)
 
 
 def save_checkpoint(state, is_best, save_path=opt.checkpoints_save_dir):
@@ -480,3 +480,4 @@ def inference(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, m
         )
     print_log(log)
     print("#### %s end ####\n" % mode)
+    return Hlosses.avg, Rlosses.avg, Rlosses_.avg, Hdiff.avg, Rdiff.avg, Rdiff_.avg
