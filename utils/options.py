@@ -45,6 +45,9 @@ parser.add_argument('--iters_per_epoch', type=int, default=1000, help='number of
 
 # additional parameters
 parser.add_argument('--test', action='store_true', help='test mode')
+parser.add_argument('--load_checkpoint', action='store_true', help='load checkpoint')
+parser.add_argument('--checkpoint_name', type=str, default='', help='exper_name of loaded checkpoint')
+parser.add_argument('--checkpoint_type', type=str, default='best', help='type of the checkpint file [best | newest]')
 parser.add_argument('--checkpoint_path', type=str, default='', help='path of one checkpint file')
 parser.add_argument('--key', type=str, default='', help='key for encryption')
 parser.add_argument('--redundance', type=int, default=-1, help='redundance size of key; e.g. `16` for mapping it to a 3*16*16 tensor; `-1` for simple duplication')
@@ -55,8 +58,18 @@ opt = parser.parse_args()
 _ngpu = len(opt.gpu_ids.split(','))
 assert _ngpu <= torch.cuda.device_count(), 'There are not enough GPUs!'
 opt.workers = _ngpu * 4
+
 _r = opt.redundance
 assert (_r == -1) or (_r % 2 == 0 and _r >= 8), 'Unexpected redundance size!'
+
+if opt.checkpoint_name == '':
+    opt.checkpoint_name = opt.exper_name
+_load_checkpoint_dir = opt.root +  '/sdh/exper_info/' + opt.checkpoint_name
+assert _load_checkpoint_dir, 'Do not exist this checkpoint dir!'
+
+if opt.test:
+    opt.load_checkpoint = True
+    assert opt.load_checkpoint, 'Test mode must load a checkpoint file'
 
 opt.data_dir = opt.root + '/dataset'
 opt.exper_dir = opt.root +  '/sdh/exper_info/' + opt.exper_name
@@ -67,3 +80,4 @@ opt.train_pics_save_dir = opt.exper_dir + '/train_pics'
 opt.val_pics_save_dir = opt.exper_dir + '/val_pics'
 opt.test_pics_save_dir = opt.exper_dir + '/test_pics'
 opt.loss_save_path = opt.exper_dir + '/train_loss.png'
+opt.checkpoint_path = _load_checkpoint_dir + '/checkpoints/checkpoint_%s.pth.tar' % opt.checkpoint_type

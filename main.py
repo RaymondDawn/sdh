@@ -87,7 +87,7 @@ def main():
 
     Hnet = torch.nn.DataParallel(Hnet).cuda()
     Rnet = torch.nn.DataParallel(Rnet).cuda()
-    if opt.checkpoint_path != '':
+    if opt.load_checkpoint:
         print("Loading checkpoints for H and R...")
         checkpoint = torch.load(opt.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
