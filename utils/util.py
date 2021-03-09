@@ -153,7 +153,11 @@ def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret
     else:
         show_all = torch.cat((show_cover, show_secret, (rev_secret_*30).clamp_(0.0, 1.0)), dim=0)
 
-    vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
+    # vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
+    grid = vutils.make_grid(show_all, nrow=batch_size, padding=1, normalize=False)
+    ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
+    im = Image.fromarray(ndarr)
+    im.save(result_name)
 
 
 def save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, save_path=opt.loss_save_path):

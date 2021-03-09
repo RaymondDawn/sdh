@@ -17,6 +17,7 @@ parser.add_argument('--checkpoints_save_dir', type=str, default='', help='dir of
 parser.add_argument('--train_pics_save_dir', type=str, default='', help='dir of saving pictures in training')
 parser.add_argument('--val_pics_save_dir', type=str, default='', help='dir of saving pictures in validation')
 parser.add_argument('--test_pics_save_dir', type=str, default='', help='dir of saving pictures in test')
+parser.add_argument('--analysis_pics_save_dir', type=str, default='', help='dir of saving pictures in analysis')
 parser.add_argument('--loss_save_path', type=str, default='', help='path of saving the curve of loss function')
 parser.add_argument('--log_freq', type=int, default=10, help='frequency of saving log information')
 parser.add_argument('--result_pic_freq', type=int, default=100, help='frequency of saving result pictures in the first epoch')
@@ -79,5 +80,6 @@ opt.checkpoints_save_dir = opt.exper_dir + '/checkpoints'
 opt.train_pics_save_dir = opt.exper_dir + '/train_pics'
 opt.val_pics_save_dir = opt.exper_dir + '/val_pics'
 opt.test_pics_save_dir = opt.exper_dir + '/test_pics'
+opt.analysis_pics_save_dir = opt.exper_dir + '/analysis_pics'
 opt.loss_save_path = opt.exper_dir + '/train_loss.png'
 opt.checkpoint_path = _load_checkpoint_dir + '/checkpoints/checkpoint_%s.pth.tar' % opt.checkpoint_type

@@ -84,7 +84,6 @@ def main():
 
     Hnet.apply(weights_init)
     Rnet.apply(weights_init)
-
     Hnet = torch.nn.DataParallel(Hnet).cuda()
     Rnet = torch.nn.DataParallel(Rnet).cuda()
     if opt.load_checkpoint:
@@ -138,7 +137,7 @@ def main():
             val_loader_secret, val_loader_cover,
             Hnet, Rnet,
             optimizer, scheduler, criterion,
-            cover_dependent=opt.cover_dependent
+            opt.cover_dependent
         )
     else:
         print("Making test dataloader...")
