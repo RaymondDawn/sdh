@@ -217,7 +217,7 @@ def adjust_learning_rate(optimizer, epoch, decay_num=2):
         param_group['lr'] = lr
 
 
-def forward_pass(secret, cover, Hnet, Rnet, criterion, cover_dependent, Enet=None):
+def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, Enet=None):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -259,6 +259,8 @@ def forward_pass(secret, cover, Hnet, Rnet, criterion, cover_dependent, Enet=Non
         container = H_output + cover
     H_loss = criterion(container, cover)
 
+    container = NoiseLayers(container)
+
     # TODO: modify key to test the sensitivity
 
     rev_secret = Rnet(torch.cat((container, red_key), dim=1))
@@ -275,7 +277,7 @@ def forward_pass(secret, cover, Hnet, Rnet, criterion, cover_dependent, Enet=Non
     return cover, container, secret, rev_secret, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
 
 
-def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, optimizer, scheduler, criterion, cover_dependent):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
@@ -321,7 +323,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_size = opt.batch_size
 
             cover, container, secret, rev_secret, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-                = forward_pass(secret, cover, Hnet, Rnet, criterion, cover_dependent)
+                = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent)
             
             Hlosses.update(H_loss.item(), batch_size)
             Rlosses.update(R_loss.item(), batch_size)
@@ -382,7 +384,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, opt.loss_save_path)
 
         val_hloss, val_rloss, val_rloss_, val_hdiff, val_rdiff, val_rdiff_ \
-            = inference(val_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, mode='val', epoch=epoch)
+            = inference(val_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, save_num=1, mode='val', epoch=epoch)
 
         scheduler.step(val_rloss)
 
@@ -413,7 +415,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
     print("######## TRAIN END ########")
 
 
-def inference(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, mode='test', epoch=None):
+def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, save_num=1, mode='test', epoch=None):
     """Validate or test the performance of Hnet and Rnet.
 
     Parameters:
@@ -444,7 +446,7 @@ def inference(data_loader, Hnet, Rnet, criterion, cover_dependent, save_num=1, m
 
     for i, (secret, cover) in enumerate(data_loader, start=1):
         cover, container, secret, rev_secret, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret, cover, Hnet, Rnet, criterion, cover_dependent)
+            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent)
 
         Hlosses.update(H_loss.item(), batch_size)
         Rlosses.update(R_loss.item(), batch_size)

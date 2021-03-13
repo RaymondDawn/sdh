@@ -1,4 +1,5 @@
 import os
+import copy
 from PIL import Image
 import torch
 from torch import nn, optim
@@ -8,10 +9,10 @@ from torchvision import transforms
 
 from utils.options import opt
 from utils.util import *
-from models import *
+from models.networks import *
 
 
-def multi_hiding(n=2):
+def multi_hiding(n):
     cudnn.benchmark = True  # speed up
 
     print("Making analysis dir...")
@@ -25,19 +26,32 @@ def multi_hiding(n=2):
     testdir = os.path.join(opt.data_dir, 'test')
 
     assert opt.image_size % 32 == 0
-    transform = transforms.Compose([
+    transform_color = transforms.Compose([
         transforms.Resize([opt.image_size, opt.image_size]),
         transforms.ToTensor()
     ])
+    transform_gray = transforms.Compose([
+        transforms.Grayscale(num_output_channels=1),
+        transforms.Resize([opt.image_size, opt.image_size]),
+        transforms.ToTensor()
+    ])
+    if opt.channel_cover == 3:
+        transform_cover = transform_color
+    else:
+        transform_cover = transform_gray
+    if opt.channel_secret == 3:
+        transform_secret = transform_color
+    else:
+        transform_secret = transform_gray
     
     print("Making datasets and dataloaders...")
-    dataset_cover = ImageFolder(valdir, transform)
+    dataset_cover = ImageFolder(valdir, transform_cover)
     loader_cover = DataLoader(
         dataset_cover,
         batch_size=opt.batch_size,
         shuffle=True
     )
-    dataset_secret = ImageFolder(testdir, transform)
+    dataset_secret = ImageFolder(testdir, transform_secret)
     loader_secret = DataLoader(
         dataset_secret,
         batch_size=opt.batch_size*n,  # hiding n secrets into 1 cover
@@ -94,7 +108,15 @@ def multi_hiding(n=2):
             key_cache.append(key)
             red_key = key.view(1, 1, 1, w).repeat(b, c, h, 1)
 
-            H_input = torch.cat((secret_split, red_key), dim=1)
+            # modify key to test the sensitivity
+            bits = opt.modified_bits
+            key_ = copy.deepcopy(key)
+            for i in range(bits):
+                index = (i + int(np.random.rand() * 128)) % 128
+                key_[index] = -key_[index] + 1  # 0->1; 1->0
+            red_key_ = key_.view(1, 1, 1, w).repeat(b, c, h, 1)
+
+            H_input = torch.cat((secret_split, red_key_), dim=1)
             H_output = Hnet(H_input)
 
             container = H_output + container
@@ -120,4 +142,4 @@ def multi_hiding(n=2):
 
 
 if __name__ == '__main__':
-    multi_hiding()
+    multi_hiding(n=opt.num_hiding)

@@ -43,6 +43,7 @@ parser.add_argument('--gamma', type=float, default=0.50, help='weight of fake_ke
 parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
 parser.add_argument('--lr_decay_freq', type=int, default=30, help='frequency of decaying lr')
 parser.add_argument('--iters_per_epoch', type=int, default=1000, help='number of iterations in one epoch')
+parser.add_argument('--noise_type', type=str, default='identity', help='type of distortion [identity | noise | blur | resize | jpeg | combine]')
 
 # additional parameters
 parser.add_argument('--test', action='store_true', help='test mode')
@@ -52,13 +53,13 @@ parser.add_argument('--checkpoint_type', type=str, default='best', help='type of
 parser.add_argument('--checkpoint_path', type=str, default='', help='path of one checkpint file')
 parser.add_argument('--key', type=str, default='', help='key for encryption')
 parser.add_argument('--redundance', type=int, default=-1, help='redundance size of key; e.g. `16` for mapping it to a 3*16*16 tensor; `-1` for simple duplication')
-
+parser.add_argument('--modified_bits', type=int, default=0, help='number of modified bits in the key')
+parser.add_argument('--num_hiding', type=int, default=1, help='number of secret to hide')
 
 opt = parser.parse_args()
 
 _ngpu = len(opt.gpu_ids.split(','))
 assert _ngpu <= torch.cuda.device_count(), 'There are not enough GPUs!'
-opt.workers = _ngpu * 4
 
 _r = opt.redundance
 assert (_r == -1) or (_r % 2 == 0 and _r >= 8), 'Unexpected redundance size!'

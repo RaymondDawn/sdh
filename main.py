@@ -8,7 +8,7 @@ from torchvision import transforms
 
 from utils.options import opt
 from utils.util import *
-from models import *
+from models.networks import *
 
 
 def main():
@@ -42,21 +42,34 @@ def main():
     testdir = os.path.join(opt.data_dir, 'test')
 
     assert opt.image_size % 32 == 0
-    transform = transforms.Compose([
+    transform_color = transforms.Compose([
         transforms.Resize([opt.image_size, opt.image_size]),
         transforms.ToTensor()
     ])
+    transform_gray = transforms.Compose([
+        transforms.Grayscale(num_output_channels=1),
+        transforms.Resize([opt.image_size, opt.image_size]),
+        transforms.ToTensor()
+    ])
+    if opt.channel_cover == 3:
+        transform_cover = transform_color
+    else:
+        transform_cover = transform_gray
+    if opt.channel_secret == 3:
+        transform_secret = transform_color
+    else:
+        transform_secret = transform_gray
 
     if not opt.test:
         print("Making train and val datasets...")
-        train_dataset_cover = ImageFolder(traindir, transform)
-        train_dataset_secret = ImageFolder(traindir, transform)
-        val_dataset_cover = ImageFolder(valdir, transform)
-        val_dataset_secret = ImageFolder(valdir, transform)
+        train_dataset_cover = ImageFolder(traindir, transform_cover)
+        train_dataset_secret = ImageFolder(traindir, transform_secret)
+        val_dataset_cover = ImageFolder(valdir, transform_cover)
+        val_dataset_secret = ImageFolder(valdir, transform_secret)
     else:
         print("Making test dataset...")
-        test_dataset_cover = ImageFolder(testdir, transform)
-        test_dataset_secret = ImageFolder(testdir, transform)
+        test_dataset_cover = ImageFolder(testdir, transform_cover)
+        test_dataset_secret = ImageFolder(testdir, transform_secret)
 
     print("Constructing H and R networks...")
     if opt.cover_dependent:
@@ -91,6 +104,8 @@ def main():
         checkpoint = torch.load(opt.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
         Rnet.load_state_dict(checkpoint['R_state_dict'])
+
+    NoiseLayers = torch.nn.DataParallel(AttackNet(noise_type=opt.noise_type)).cuda()
 
     if opt.loss == 'l1':
         criterion = nn.L1Loss().cuda()
@@ -135,7 +150,7 @@ def main():
             # zip loader in train()
             train_loader_secret, train_loader_cover,
             val_loader_secret, val_loader_cover,
-            Hnet, Rnet,
+            Hnet, Rnet, NoiseLayers,
             optimizer, scheduler, criterion,
             opt.cover_dependent
         )
@@ -156,7 +171,7 @@ def main():
 
         test_loader = zip(test_loader_secret, test_loader_cover)
         inference(
-            test_loader, Hnet, Rnet,
+            test_loader, Hnet, Rnet, NoiseLayers,
             criterion, opt.cover_dependent, save_num=1
         )
 

@@ -2,6 +2,8 @@ import functools
 import torch
 from torch import nn
 
+from .noise_layers import *
+
 
 def get_norm_layer(norm_type='batch'):
     """Return a normalization layer.
@@ -24,14 +26,6 @@ def get_norm_layer(norm_type='batch'):
     else:
         raise NotImplementedError('normalization layer [%s] is not found' % norm_type)
     return norm_layer
-
-
-class Identity(nn.Module):
-    def __init__(self):
-        super(Identity, self).__init__()
-    
-    def forward(self, x):
-        return x
 
 
 class UnetGenerator(nn.Module):
@@ -193,3 +187,39 @@ class RevealNet(nn.Module):
         X = self.relu(self.norm5(self.conv5(X)))
         output = self.output(self.conv6(X))
         return output
+
+
+class AttackNet(nn.Module):
+    """Create a Attack network, i.e. noise layers."""
+    def __init__(self, noise_type='combine'):
+        super(AttackNet, self).__init__()
+        self.noise_type = noise_type
+        self.identity = Identity()
+        self.gaussian_noise = GaussianNoise()
+        self.gaussian_blur = GaussianBlur()
+        self.resize = Resize()
+        self.jpeg = DiffJPEG()
+
+    def forward(self, X):
+        b, _, _, _ = X.shape
+        if self.noise_type == 'combine':
+            X_identity = self.identity(X[: b//5])
+            X_gaussian_noise = self.gaussian_noise(X[b//5 : 2*b//5])
+            X_gaussian_blur = self.gaussian_blur(X[2*b//5 : 3*b//5])
+            X_resize = self.resize(X[3*b//5 : 4*b//5])
+            X_jpeg = self.jpeg(X[4*b//5 :])
+            return torch.cat((X_identity, X_gaussian_noise, X_gaussian_blur, X_resize, X_jpeg), dim=0)
+        else:
+            if self.noise_type == 'identity':
+                X_noise = self.identity(X)  # no distortion
+            elif self.noise_type == 'noise':
+                X_noise = self.gaussian_noise(X)
+            elif self.noise_type == 'blur':
+                X_noise = self.gaussian_blur(X)
+            elif self.noise_type == 'resize':
+                X_noise = self.resize(X)
+            elif self.noise_type == 'jpeg':
+                X_noise = self.jpeg(X)
+            else:
+                NotImplementedError('noise type [%s] is not found' % self.noise_type)
+            return X_noise
