@@ -131,7 +131,7 @@ def save_image(input_image, image_path, save_all=False, start=0):
             image_pil.save(image_path + '/%d.png' % (i+start))
 
 
-def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret_, epoch, i, save_path):
+def save_result_pic(batch_size, cover, container, secret_set, rev_secret_set, rev_secret_, epoch, i, save_path):
     """Save a batch of result pictures."""
     if not os.path.exists(save_path):
         os.makedirs(save_path)
@@ -142,16 +142,24 @@ def save_result_pic(batch_size, cover, container, secret, rev_secret, rev_secret
         result_name = '%s/result_pic_epoch%03d_batch%04d.png' % (save_path, epoch, i)
 
     cover_gap = container - cover
-    secret_gap = rev_secret - secret
     cover_gap = (cover_gap*10 + 0.5).clamp_(0.0, 1.0)
-    secret_gap = (secret_gap*10 + 0.5).clamp_(0.0, 1.0)
-
     show_cover = torch.cat((cover, container, cover_gap), dim=0)
-    show_secret = torch.cat((secret, rev_secret, secret_gap), dim=0)
+    
+    secret_gap_0 = rev_secret_set[0] - secret_set[0]
+    secret_gap_set = [(secret_gap_0*10 + 0.5).clamp_(0.0, 1.0)]
+    show_secret = torch.cat((secret_set[0], rev_secret_set[0], secret_gap_set[0]), dim=0)
+    for i in range(1, opt.num_secrets):
+        secret_gap_i = rev_secret_set[i] - secret_set[i]
+        secret_gap_set.append((secret_gap_i*10 + 0.5).clamp_(0.0, 1.0))
+        show_secret = torch.cat((show_secret, secret_set[i], rev_secret_set[i], secret_gap_set[i]), dim=0)
+    if secret_gap_0.shape[1] == 1:  # gray
+        show_secret = show_secret.repeat(1, 3, 1, 1)
+    
     if rev_secret_ is None:
         show_all = torch.cat((show_cover, show_secret), dim=0)
     else:
-        show_all = torch.cat((show_cover, show_secret, (rev_secret_*30).clamp_(0.0, 1.0)), dim=0)
+        rev_secret_ = rev_secret_.repeat(1, 3, 1, 1)
+        show_all = torch.cat((show_cover, show_secret, (rev_secret_*50).clamp_(0.0, 1.0)), dim=0)
 
     # vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
     grid = vutils.make_grid(show_all, nrow=batch_size, padding=1, normalize=False)
@@ -217,7 +225,7 @@ def adjust_learning_rate(optimizer, epoch, decay_num=2):
         param_group['lr'] = lr
 
 
-def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, Enet=None):
+def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key=True, Enet=None):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -230,27 +238,44 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
         Enet (nn.Module or None)    -- a fully connected layer or `None`
     """
     cover, secret = cover.cuda(), secret.cuda()
-    assert cover.shape == secret.shape, 'Shape of cover and secret images are expected to be the same!'
     b, c, h, w = cover.shape
-    assert h == w, 'cover and secret images are expected to be squares'
-    key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()  # binary
-    fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
-    while torch.equal(fake_key, key):
+    secret_set, rev_secret_set = [], []
+    for i in range(opt.num_secrets):
+        secret_set.append(secret[b*i:b*(i+1), :, :, :])
+
+    if use_key:
+        key_set, red_key_set = [], []
+        for i in range(opt.num_secrets):
+            key_set.append(torch.Tensor([float(torch.randn(1)<0) for __ in range(w)]).cuda())
         fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
+        # assert fake_key is different from every key
+        for key in key_set:
+            while torch.equal(fake_key, key):
+                fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
 
-    zeros = torch.zeros(cover.shape).cuda()
-
-    if Enet is None:
-        red_key = key.view(1, 1, 1, w).repeat(b, c, h, 1)
-        red_fake_key = fake_key.view(1, 1, 1, w).repeat(b, c, h, 1)
-    else:
-        # TODO: a fully connected layer
-        pass
+        if Enet is None:
+            for key in key_set:
+                red_key_set.append(key.view(1, 1, 1, w).repeat(b, opt.channel_key, h, 1))
+            red_fake_key = fake_key.view(1, 1, 1, w).repeat(b, opt.channel_key, h, 1)
+        else:
+            # TODO: a fully connected layer
+            pass
+        zeros = torch.zeros(red_key_set[0].shape).cuda()
 
     if cover_dependent:
-        H_input = torch.cat((cover, secret, red_key), dim=1)
+        if use_key:
+            H_input = cover
+            for i in range(opt.num_secrets):
+                H_input = torch.cat((H_input, secret_set[i], red_key_set[i]), dim=1)
+        else:
+            H_input = torch.cat((cover, secret), dim=1)
     else:
-        H_input = torch.cat((secret, red_key), dim=1)
+        if use_key:
+            H_input = torch.cat((secret_set[0], red_key_set[0]), dim=1)
+            for i in range(1, opt.num_secrets):
+                H_input = torch.cat((H_input, secret_set[i], red_key_set[i]), dim=1)
+        else:
+            H_input = secret
     H_output = Hnet(H_input)
 
     if cover_dependent:
@@ -261,23 +286,47 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
 
     container = NoiseLayers(container)
 
-    # TODO: modify key to test the sensitivity
+    if use_key:
+        R_loss = 0
+        for i in range(opt.num_secrets):
+            # modify key to test the sensitivity
+            bits = opt.modified_bits
+            key_ = copy.deepcopy(key_set[i])
+            for j in range(bits):
+                index = (j + int(np.random.rand() * 128)) % 128
+                key_[index] = -key_[index] + 1  # 0->1; 1->0
+            if Enet is None:
+                red_key_ = key_.view(1, 1, 1, w).repeat(b, opt.channel_key, h, 1)
+            else:
+                pass
+            rev_secret_set.append(Rnet(torch.cat((container, red_key_), dim=1)))
+            R_loss += criterion(rev_secret_set[i], secret_set[i])
+        R_loss /= opt.num_secrets
+    else:
+        rev_secret_set.append(Rnet(container))
+        R_loss = criterion(secret_set[0], rev_secret_set[0])
 
-    rev_secret = Rnet(torch.cat((container, red_key), dim=1))
-    R_loss = criterion(rev_secret, secret)
-
-    rev_secret_ = Rnet(torch.cat((container, red_fake_key), dim=1))
-    R_loss_ = criterion(rev_secret_, zeros)
-    R_diff_ = (rev_secret_).abs().mean() * 255
+    if use_key:
+        rev_secret_ = Rnet(torch.cat((container, red_fake_key), dim=1))
+        R_loss_ = criterion(rev_secret_, zeros)
+        R_diff_ = (rev_secret_).abs().mean() * 255
+    else:
+        rev_secret_, R_loss_, R_diff_ = None, 0, 0
 
     # L1 metric (APD)
     H_diff = (container - cover).abs().mean() * 255
-    R_diff = (rev_secret - secret).abs().mean() * 255
+    if use_key:
+        R_diff = 0
+        for i in range(opt.num_secrets):
+            R_diff += (rev_secret_set[i] - secret_set[i]).abs().mean() * 255
+        R_diff /= opt.num_secrets
+    else:
+        R_diff = (rev_secret_set[0] - secret_set[0]).abs().mean() * 255
 
-    return cover, container, secret, rev_secret, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
+    return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
 
 
-def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
@@ -322,15 +371,16 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             data_time.update(time.time() - start_time)
             batch_size = opt.batch_size
 
-            cover, container, secret, rev_secret, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-                = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent)
+            cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
+                = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key)
             
             Hlosses.update(H_loss.item(), batch_size)
             Rlosses.update(R_loss.item(), batch_size)
             Hdiff.update(H_diff.item(), batch_size)
             Rdiff.update(R_diff.item(), batch_size)
-            Rlosses_.update(R_loss_.item(), batch_size)
-            Rdiff_.update(R_diff_.item(), batch_size)
+            if use_key:
+                Rlosses_.update(R_loss_.item(), batch_size)
+                Rdiff_.update(R_diff_.item(), batch_size)
 
             loss_sum = H_loss + opt.beta * R_loss + opt.gamma * R_loss_
             SumLosses.update(loss_sum.item(), batch_size)
@@ -355,7 +405,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
                 save_result_pic(
                     batch_size,
                     cover, container,
-                    secret, rev_secret, rev_secret_,
+                    secret_set, rev_secret_set, rev_secret_,
                     epoch, i,
                     opt.train_pics_save_dir
                 )
@@ -365,7 +415,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         save_result_pic(
             batch_size,
             cover, container,
-            secret, rev_secret, rev_secret_,
+            secret_set, rev_secret_set, rev_secret_,
             epoch, i,
             opt.train_pics_save_dir
         )
@@ -380,7 +430,8 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
 
         h_losses_list.append(Hlosses.avg)
         r_losses_list.append(Rlosses.avg)
-        r_losses_list_.append(Rlosses_.avg)
+        if use_key:
+            r_losses_list_.append(Rlosses_.avg)
         save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, opt.loss_save_path)
 
         val_hloss, val_rloss, val_rloss_, val_hdiff, val_rdiff, val_rdiff_ \
@@ -388,7 +439,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
 
         scheduler.step(val_rloss)
 
-        sum_diff = val_hdiff + val_rdiff + val_rdiff_
+        sum_diff = val_hdiff + val_rdiff + 10*val_rdiff_
         is_best = sum_diff < MIN_LOSS
         MIN_LOSS = min(MIN_LOSS, sum_diff)
 
@@ -415,7 +466,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
     print("######## TRAIN END ########")
 
 
-def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, save_num=1, mode='test', epoch=None):
+def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, save_num=1, mode='test', epoch=None):
     """Validate or test the performance of Hnet and Rnet.
 
     Parameters:
@@ -445,22 +496,23 @@ def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, 
     Rnet.eval()
 
     for i, (secret, cover) in enumerate(data_loader, start=1):
-        cover, container, secret, rev_secret, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent)
+        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
+            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key)
 
         Hlosses.update(H_loss.item(), batch_size)
         Rlosses.update(R_loss.item(), batch_size)
         Hdiff.update(H_diff.item(), batch_size)
         Rdiff.update(R_diff.item(), batch_size)
-        Rlosses_.update(R_loss_.item(), batch_size)
-        Rdiff_.update(R_diff_.item(), batch_size)
+        if use_key:
+            Rlosses_.update(R_loss_.item(), batch_size)
+            Rdiff_.update(R_diff_.item(), batch_size)
 
         if i <= save_num:
             if mode == 'test':
                 save_result_pic(
                     batch_size,
                     cover, container,
-                    secret, rev_secret, rev_secret_,
+                    secret_set, rev_secret_set, rev_secret_,
                     epoch=None, i=i,  # epoch is None in test mode
                     save_path=opt.test_pics_save_dir
                 )
@@ -468,7 +520,7 @@ def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, 
                 save_result_pic(
                     batch_size,
                     cover, container,
-                    secret, rev_secret, rev_secret_,
+                    secret_set, rev_secret_set, rev_secret_,
                     epoch, i,
                     opt.val_pics_save_dir
                 )

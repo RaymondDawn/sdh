@@ -64,32 +64,65 @@ def main():
         print("Making train and val datasets...")
         train_dataset_cover = ImageFolder(traindir, transform_cover)
         train_dataset_secret = ImageFolder(traindir, transform_secret)
+        for i in range(1, opt.num_secrets):
+            train_dataset_secret += ImageFolder(traindir, transform_secret)
+        
         val_dataset_cover = ImageFolder(valdir, transform_cover)
         val_dataset_secret = ImageFolder(valdir, transform_secret)
+        for i in range(1, opt.num_secrets):
+            val_dataset_secret += ImageFolder(valdir, transform_secret)
     else:
         print("Making test dataset...")
         test_dataset_cover = ImageFolder(testdir, transform_cover)
         test_dataset_secret = ImageFolder(testdir, transform_secret)
+        for i in range(1, opt.num_secrets):
+            test_dataset_secret += ImageFolder(testdir, transform_secret)
 
     print("Constructing H and R networks...")
     if opt.cover_dependent:
-        Hnet = UnetGenerator(
-            input_nc=opt.channel_cover+opt.channel_secret+opt.channel_secret,
-            output_nc=opt.channel_cover,
-            num_downs=opt.num_downs,
-            norm_type=opt.norm_type,
-            output_function='sigmoid'
-        )
+        if opt.use_key:
+            Hnet = UnetGenerator(
+                input_nc=opt.channel_cover + opt.num_secrets * (opt.channel_secret+opt.channel_key),
+                output_nc=opt.channel_cover,
+                num_downs=opt.num_downs,
+                norm_type=opt.norm_type,
+                output_function='sigmoid'
+            )
+        else:
+            Hnet = UnetGenerator(
+                input_nc=opt.channel_cover + opt.num_secrets * opt.channel_secret,
+                output_nc=opt.channel_cover,
+                num_downs=opt.num_downs,
+                norm_type=opt.norm_type,
+                output_function='sigmoid'
+            )
     else:
-        Hnet = UnetGenerator(
-            input_nc=opt.channel_secret+opt.channel_secret,
+        if opt.use_key:
+            Hnet = UnetGenerator(
+                input_nc=opt.num_secrets * (opt.channel_secret + opt.channel_key),
+                output_nc=opt.channel_cover,
+                num_downs=opt.num_downs,
+                norm_type=opt.norm_type,
+                output_function='tanh'
+            )
+        else:
+            Hnet = UnetGenerator(
+            input_nc=opt.num_secrets * opt.channel_secret,
             output_nc=opt.channel_cover,
             num_downs=opt.num_downs,
             norm_type=opt.norm_type,
             output_function='tanh'
         )
-    Rnet = RevealNet(
-        input_nc=opt.channel_cover+opt.channel_secret,
+    if opt.use_key:
+        Rnet = RevealNet(
+            input_nc=opt.channel_cover+opt.channel_key,
+            output_nc=opt.channel_secret,
+            norm_type=opt.norm_type,
+            output_function='sigmoid'
+        )
+    else:
+        Rnet = RevealNet(
+        input_nc=opt.channel_cover,
         output_nc=opt.channel_secret,
         norm_type=opt.norm_type,
         output_function='sigmoid'
@@ -123,7 +156,7 @@ def main():
         print("Making train and val dataloaders...")
         train_loader_secret = DataLoader(
             train_dataset_secret,
-            batch_size=opt.batch_size,
+            batch_size=opt.batch_size*opt.num_secrets,
             shuffle=True,
             num_workers=opt.workers
         )
@@ -135,7 +168,7 @@ def main():
         )
         val_loader_secret = DataLoader(
             val_dataset_secret,
-            batch_size=opt.batch_size,
+            batch_size=opt.batch_size*opt.num_secrets,
             shuffle=False,  # do not shuffle secret image when in val mode
             num_workers=opt.workers
         )
@@ -152,13 +185,13 @@ def main():
             val_loader_secret, val_loader_cover,
             Hnet, Rnet, NoiseLayers,
             optimizer, scheduler, criterion,
-            opt.cover_dependent
+            opt.cover_dependent, opt.use_key
         )
     else:
         print("Making test dataloader...")
         test_loader_secret = DataLoader(
             test_dataset_secret,
-            batch_size=opt.batch_size,
+            batch_size=opt.batch_size*opt.num_secrets,
             shuffle=False,  # do not shuffle secret image when in test mode
             num_workers=opt.workers
         )
@@ -172,7 +205,8 @@ def main():
         test_loader = zip(test_loader_secret, test_loader_cover)
         inference(
             test_loader, Hnet, Rnet, NoiseLayers,
-            criterion, opt.cover_dependent, save_num=1
+            criterion, opt.cover_dependent, opt.use_key,
+            save_num=1, mode='test', epoch=None
         )
 
 

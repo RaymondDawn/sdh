@@ -29,11 +29,14 @@ parser.add_argument('--data_dir', type=str, default='', help='dir of dataset')
 
 # model parameters
 parser.add_argument('--cover_dependent', action='store_true', help='DDH(True) or UDH(False)')
-parser.add_argument('--channel_secret', type=int, default=3, help='number of channels for secret images')
+parser.add_argument('--use_key', action='store_true', help='use key or not')
 parser.add_argument('--channel_cover', type=int, default=3, help='number of channels for cover images')
+parser.add_argument('--channel_secret', type=int, default=3, help='number of channels for secret images')
+parser.add_argument('--channel_key', type=int, default=3, help='number of channels for embedded key')
 parser.add_argument('--num_downs', type=int, default=5, help='number of down submodules in U-Net')
 parser.add_argument('--norm_type', type=str, default='batch', help='type of normalization layer')
 parser.add_argument('--loss', type=str, default='l2', help='loss function [l1 | l2]')
+parser.add_argument('--num_secrets', type=int, default=1, help='the number of secret images to be hidden')
 
 # training parameters
 parser.add_argument('--epochs', type=int, default=50, help='epochs for training')
@@ -54,7 +57,7 @@ parser.add_argument('--checkpoint_path', type=str, default='', help='path of one
 parser.add_argument('--key', type=str, default='', help='key for encryption')
 parser.add_argument('--redundance', type=int, default=-1, help='redundance size of key; e.g. `16` for mapping it to a 3*16*16 tensor; `-1` for simple duplication')
 parser.add_argument('--modified_bits', type=int, default=0, help='number of modified bits in the key')
-parser.add_argument('--num_hiding', type=int, default=1, help='number of secret to hide')
+
 
 opt = parser.parse_args()
 
