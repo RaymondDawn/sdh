@@ -223,3 +223,35 @@ class AttackNet(nn.Module):
             else:
                 NotImplementedError('noise type [%s] is not found' % self.noise_type)
             return X_noise
+
+
+class SpectralNormConvBNReLU(nn.Module):
+    def __init__(self, input_nc, output_nc):
+        super(SpectralNormConvBNReLU, self).__init__()
+        self.input_nc = input_nc
+        self.output_nc = output_nc
+        self.conv = nn.utils.spectral_norm(nn.Conv2d(input_nc, output_nc, kernel_size=3, stride=1, padding=1))
+        self.bn = nn.BatchNorm2d(output_nc)
+        self.relu = nn.ReLU(True)
+
+    def forward(self, X):
+        X = self.conv(X)
+        X = self.bn(X)
+        return self.relu(X)
+
+
+class AdversarialNet(nn.Module):
+    def __init__(self, input_nc):
+        super(AdversarialNet, self).__init__()
+        self.input_nc = input_nc
+        self.conv1 = SpectralNormConvBNReLU(input_nc, 64)
+        self.conv2, self.conv3 = SpectralNormConvBNReLU(64, 64), SpectralNormConvBNReLU(64, 64)
+        self.average_pooling = nn.AdaptiveAvgPool2d(1)
+        self.linear = nn.utils.spectral_norm(nn.Linear(64, 1))
+
+    def forward(self, X):  # (B, N, H, W) -> (B, 1)
+        X = self.conv3(self.conv2(self.conv1(X)))
+        X = self.average_pooling(X)
+        X = X.view(X.shape[0], -1)
+        X = self.linear(X)
+        return X

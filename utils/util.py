@@ -158,8 +158,8 @@ def save_result_pic(batch_size, cover, container, secret_set, rev_secret_set, re
     if rev_secret_ is None:
         show_all = torch.cat((show_cover, show_secret), dim=0)
     else:
-        rev_secret_ = rev_secret_.repeat(1, 3, 1, 1)
-        show_all = torch.cat((show_cover, show_secret, (rev_secret_*50).clamp_(0.0, 1.0)), dim=0)
+        rev_secret_ = rev_secret_.repeat(1, 3//opt.channel_secret, 1, 1)
+        show_all = torch.cat((show_cover, show_secret, (rev_secret_*30).clamp_(0.0, 1.0)), dim=0)
 
     # vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
     grid = vutils.make_grid(show_all, nrow=batch_size, padding=1, normalize=False)
@@ -326,7 +326,7 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
     return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
 
 
-def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key, Adversary=None, optimizer_adv=None):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
@@ -357,6 +357,8 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         Hlosses = AverageMeter()     # losses for hiding network
         Rlosses = AverageMeter()     # losses for reveal network
         Rlosses_ = AverageMeter()    # losses for reveal network with fake key
+        Alosses = AverageMeter()     # losses for adversarial loss
+        Alosses_ = AverageMeter()    # losses for adversarial network
         SumLosses = AverageMeter()   # losses sumed by H and R with a factor beta(0.75 for default)
         Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
         Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
@@ -374,6 +376,16 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
                 = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key)
             
+            if Adversary is not None:
+                criterion_adv = nn.BCEWithLogitsLoss().cuda()
+                TRUE, FALSE = torch.ones(batch_size, 1).cuda(), torch.zeros(batch_size, 1).cuda()
+                loss_adv = criterion_adv(Adversary(cover), TRUE) + criterion_adv(Adversary(container.detach()), FALSE)
+                Alosses_.update(loss_adv.item(), batch_size)
+
+                optimizer_adv.zero_grad()
+                loss_adv.backward()
+                optimizer_adv.step()
+
             Hlosses.update(H_loss.item(), batch_size)
             Rlosses.update(R_loss.item(), batch_size)
             Hdiff.update(H_diff.item(), batch_size)
@@ -381,8 +393,14 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             if use_key:
                 Rlosses_.update(R_loss_.item(), batch_size)
                 Rdiff_.update(R_diff_.item(), batch_size)
+            if Adversary is not None:
+                A_loss = criterion_adv(Adversary(container), TRUE)
+                Alosses.update(A_loss.item(), batch_size)
+            else:
+                A_loss = 0
 
-            loss_sum = H_loss + opt.beta * R_loss + opt.gamma * R_loss_
+            loss_sum = H_loss + opt.beta * R_loss + opt.gamma * R_loss_ + opt.delta * A_loss
+
             SumLosses.update(loss_sum.item(), batch_size)
 
             optimizer.zero_grad()
@@ -392,10 +410,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_time.update(time.time() - start_time)
             start_time = time.time()
 
-            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tdata_time: %.4f batch_time: %.4f" % (
+            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tA_loss: %.6f A_loss_: %.6f\tdata_time: %.4f batch_time: %.4f" % (
                 epoch, opt.epochs, i, opt.iters_per_epoch,
                 Hlosses.val, Rlosses.val, Rlosses_.val,
                 Hdiff.val, Rdiff.val, Rdiff_.val,
+                Alosses.val, Alosses_.val,
                 data_time.val, batch_time.val
             )
 
@@ -419,10 +438,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             epoch, i,
             opt.train_pics_save_dir
         )
-        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
+        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tALoss=%.6f\tALoss_=%.6f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch, SumLosses.avg,
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
             Hdiff.avg, Rdiff.avg, Rdiff_.avg,
+            Alosses.avg, Alosses_.avg,
             optimizer.param_groups[0]['lr'],
             batch_time.sum
         )
@@ -435,34 +455,56 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, opt.loss_save_path)
 
         val_hloss, val_rloss, val_rloss_, val_hdiff, val_rdiff, val_rdiff_ \
-            = inference(val_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, save_num=1, mode='val', epoch=epoch)
+            = inference(val_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, save_num=1, mode='val', epoch=epoch)
 
         scheduler.step(val_rloss)
 
-        sum_diff = val_hdiff + val_rdiff + 10*val_rdiff_
+        sum_diff = val_hdiff + val_rdiff + 5*val_rdiff_
         is_best = sum_diff < MIN_LOSS
         MIN_LOSS = min(MIN_LOSS, sum_diff)
 
         if is_best:
             print_log("Save the best checkpoint: epoch%03d" % epoch)
-            save_checkpoint(
-                {
-                    'epoch': epoch+1,
-                    'H_state_dict': Hnet.state_dict(),
-                    'R_state_dict': Rnet.state_dict(),
-                    'optimizer': optimizer.state_dict()
-                }, is_best=True
-            )
+            if opt.adversary:
+                save_checkpoint(
+                    {
+                        'epoch': epoch+1,
+                        'H_state_dict': Hnet.state_dict(),
+                        'R_state_dict': Rnet.state_dict(),
+                        'Adversary_state_dict': Adversary.state_dict(),
+                        'optimizer': optimizer.state_dict()
+                    }, is_best=True
+                )
+            else:
+                save_checkpoint(
+                    {
+                        'epoch': epoch+1,
+                        'H_state_dict': Hnet.state_dict(),
+                        'R_state_dict': Rnet.state_dict(),
+                        'optimizer': optimizer.state_dict()
+                    }, is_best=True
+                )
         else:
             print_log("Save the newest checkpoint: epoch%03d" % epoch)
-            save_checkpoint(
-                {
-                    'epoch': epoch+1,
-                    'H_state_dict': Hnet.state_dict(),
-                    'R_state_dict': Rnet.state_dict(),
-                    'optimizer': optimizer.state_dict()
-                }, is_best=False  # the newest
-            )
+            if opt.adversary:
+                save_checkpoint(
+                    {
+                        'epoch': epoch+1,
+                        'H_state_dict': Hnet.state_dict(),
+                        'R_state_dict': Rnet.state_dict(),
+                        'Adversary_state_dict': Adversary.state_dict(),
+                        'optimizer': optimizer.state_dict()
+                    }, is_best=False  # the newest
+                )
+            else:
+                save_checkpoint(
+                    {
+                        'epoch': epoch+1,
+                        'H_state_dict': Hnet.state_dict(),
+                        'R_state_dict': Rnet.state_dict(),
+                        'optimizer': optimizer.state_dict()
+                    }, is_best=False  # the newest
+                )
     print("######## TRAIN END ########")
 
 

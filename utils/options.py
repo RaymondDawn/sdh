@@ -42,11 +42,13 @@ parser.add_argument('--num_secrets', type=int, default=1, help='the number of se
 parser.add_argument('--epochs', type=int, default=50, help='epochs for training')
 parser.add_argument('--batch_size', type=int, default=25, help='batch size')
 parser.add_argument('--beta', type=float, default=0.75, help='weight of secret reveal')
-parser.add_argument('--gamma', type=float, default=0.50, help='weight of fake_key reveal')
+parser.add_argument('--gamma', type=float, default=1.5, help='weight of fake_key reveal')
+parser.add_argument('--delta', type=float, default=0.001, help='weight of adversarial classfication')
 parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
 parser.add_argument('--lr_decay_freq', type=int, default=30, help='frequency of decaying lr')
 parser.add_argument('--iters_per_epoch', type=int, default=1000, help='number of iterations in one epoch')
 parser.add_argument('--noise_type', type=str, default='identity', help='type of distortion [identity | noise | blur | resize | jpeg | combine]')
+parser.add_argument('--adversary', action='store_true', help='use adversarial structure')
 
 # additional parameters
 parser.add_argument('--test', action='store_true', help='test mode')
@@ -63,6 +65,8 @@ opt = parser.parse_args()
 
 _ngpu = len(opt.gpu_ids.split(','))
 assert _ngpu <= torch.cuda.device_count(), 'There are not enough GPUs!'
+
+opt.iters_per_epoch = opt.training_dataset_size // opt.batch_size
 
 _r = opt.redundance
 assert (_r == -1) or (_r % 2 == 0 and _r >= 8), 'Unexpected redundance size!'

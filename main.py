@@ -132,11 +132,20 @@ def main():
     Rnet.apply(weights_init)
     Hnet = torch.nn.DataParallel(Hnet).cuda()
     Rnet = torch.nn.DataParallel(Rnet).cuda()
+
+    if opt.adversary:
+        Adversary = AdversarialNet(input_nc=opt.channel_cover)
+        Adversary = torch.nn.DataParallel(Adversary).cuda()
+    else:
+        Adversary, optimizer_adv = None, None
+
     if opt.load_checkpoint:
         print("Loading checkpoints for H and R...")
         checkpoint = torch.load(opt.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
         Rnet.load_state_dict(checkpoint['R_state_dict'])
+        if opt.adversary:
+            Adversary.load_state_dict(checkpoint['Adversary_state_dict'])
 
     NoiseLayers = torch.nn.DataParallel(AttackNet(noise_type=opt.noise_type)).cuda()
 
@@ -152,6 +161,10 @@ def main():
         params = list(Hnet.parameters()) + list (Rnet.parameters())
         optimizer = optim.Adam(params, lr=opt.lr, betas=(0.5, 0.999))
         scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=8, verbose=True)
+
+        if opt.adversary:
+            print_network(Adversary)
+            optimizer_adv = optim.Adam(Adversary.parameters(), lr=opt.lr, betas=(0.5, 0.999))
 
         print("Making train and val dataloaders...")
         train_loader_secret = DataLoader(
@@ -185,7 +198,7 @@ def main():
             val_loader_secret, val_loader_cover,
             Hnet, Rnet, NoiseLayers,
             optimizer, scheduler, criterion,
-            opt.cover_dependent, opt.use_key
+            opt.cover_dependent, opt.use_key, Adversary, optimizer_adv
         )
     else:
         print("Making test dataloader...")
