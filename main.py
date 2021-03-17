@@ -128,6 +128,12 @@ def main():
         output_function='sigmoid'
     )
 
+    if opt.redundance != -1:
+        Enet = FC(opt.image_size, opt.channel_key*opt.redundance*opt.redundance)
+        Enet = torch.nn.DataParallel(Enet).cuda()
+    else:
+        Enet = None
+
     Hnet.apply(weights_init)
     Rnet.apply(weights_init)
     Hnet = torch.nn.DataParallel(Hnet).cuda()
@@ -140,12 +146,14 @@ def main():
         Adversary, optimizer_adv = None, None
 
     if opt.load_checkpoint:
-        print("Loading checkpoints for H and R...")
+        print("Loading checkpoints for networks...")
         checkpoint = torch.load(opt.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
         Rnet.load_state_dict(checkpoint['R_state_dict'])
         if opt.adversary:
             Adversary.load_state_dict(checkpoint['Adversary_state_dict'])
+        if opt.redundance != -1:
+            Enet.load_state_dict(checkpoint['E_state_dict'])
 
     NoiseLayers = torch.nn.DataParallel(AttackNet(noise_type=opt.noise_type)).cuda()
 
@@ -159,12 +167,14 @@ def main():
         print_network(Rnet)
 
         params = list(Hnet.parameters()) + list (Rnet.parameters())
-        optimizer = optim.Adam(params, lr=opt.lr, betas=(0.5, 0.999))
-        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=8, verbose=True)
-
         if opt.adversary:
             print_network(Adversary)
             optimizer_adv = optim.Adam(Adversary.parameters(), lr=opt.lr, betas=(0.5, 0.999))
+        if opt.redundance != -1:
+            print_network(Enet)
+            params += list(Enet.parameters())
+        optimizer = optim.Adam(params, lr=opt.lr, betas=(0.5, 0.999))
+        scheduler = ReduceLROnPlateau(optimizer, mode='min', factor=0.2, patience=8, verbose=True)
 
         print("Making train and val dataloaders...")
         train_loader_secret = DataLoader(
@@ -198,7 +208,7 @@ def main():
             val_loader_secret, val_loader_cover,
             Hnet, Rnet, NoiseLayers,
             optimizer, scheduler, criterion,
-            opt.cover_dependent, opt.use_key, Adversary, optimizer_adv
+            opt.cover_dependent, opt.use_key, Adversary, optimizer_adv, Enet
         )
     else:
         print("Making test dataloader...")
@@ -219,7 +229,7 @@ def main():
         inference(
             test_loader, Hnet, Rnet, NoiseLayers,
             criterion, opt.cover_dependent, opt.use_key,
-            save_num=1, mode='test', epoch=None
+            save_num=1, mode='test', epoch=None, Enet=Enet
         )
 
 

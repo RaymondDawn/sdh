@@ -148,7 +148,7 @@ def main(num_saves=1):
     Hnet.eval()
     Rnet.eval()
 
-    loss_fn = LPIPS(net='alex')
+    loss_fn_alex = LPIPS(net='alex')
     print("Hiding secrets and calculating metrics...")
     for i, (secret, cover) in enumerate(zip(loader_secret, loader_cover), start=1):
         cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
@@ -165,11 +165,11 @@ def main(num_saves=1):
         R_APD.update(R_diff.item(), batch_size)
         h_psnr, r_psnr = PSNR(cover, container), 0
         h_ssim, r_ssim = SSIM(cover, container), 0
-        h_lpips, r_lpips = loss_fn.forward(cover, container).mean(), 0
+        h_lpips, r_lpips = loss_fn_alex(cover, container).mean(), 0
         for j in range(opt.num_secrets):
             r_psnr += PSNR(secret_set[j], rev_secret_set[j])
             r_ssim += SSIM(secret_set[j], rev_secret_set[j])
-            r_lpips += loss_fn.forward(secret_set[j], rev_secret_set[j]).mean()
+            r_lpips += loss_fn_alex(secret_set[j], rev_secret_set[j]).mean()
         H_PSNR.update(h_psnr, batch_size)
         H_SSIM.update(h_ssim, batch_size)
         H_LPIPS.update(h_lpips, batch_size)
@@ -184,7 +184,7 @@ def main(num_saves=1):
         for j in range(opt.num_secrets):
             show_all = torch.cat((show_all, secret_set[j].repeat(1, 3//opt.channel_secret, 1, 1), rev_secret_set[j].repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
         if opt.use_key:
-            show_all = torch.cat((show_all, (rev_secret_*50).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
+            show_all = torch.cat((show_all, (rev_secret_*30).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
 
         if i <= num_saves:
             save_path = '%s/hiding_%02d_secrets_modified_%03d_bits.png' % (opt.analysis_pics_save_dir, opt.num_secrets, opt.modified_bits)

@@ -255,3 +255,12 @@ class AdversarialNet(nn.Module):
         X = X.view(X.shape[0], -1)
         X = self.linear(X)
         return X
+
+
+class FC(nn.Module):
+    def __init__(self, in_features, out_features):
+        super(FC, self).__init__()
+        self.linear = nn.Linear(in_features, out_features)
+
+    def forward(self, X):
+        return self.linear(X)
