@@ -1,5 +1,6 @@
 import os
 import copy
+from tqdm import tqdm
 from PIL import Image
 import torch
 from torch import nn, optim
@@ -119,6 +120,12 @@ def main(num_saves=1):
         output_function='sigmoid'
     )
 
+    if opt.redundance != -1:
+        Enet = FC(opt.image_size, opt.channel_key*opt.redundance*opt.redundance)
+        Enet = torch.nn.DataParallel(Enet).cuda()
+    else:
+        Enet = None
+
     Hnet.apply(weights_init)
     Rnet.apply(weights_init)
     Hnet = torch.nn.DataParallel(Hnet).cuda()
@@ -128,6 +135,10 @@ def main(num_saves=1):
         checkpoint = torch.load(opt.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
         Rnet.load_state_dict(checkpoint['R_state_dict'])
+        if opt.adversary:
+            Adversary.load_state_dict(checkpoint['Adversary_state_dict'])
+        if opt.redundance != -1:
+            Enet.load_state_dict(checkpoint['E_state_dict'])
 
     NoiseLayers = torch.nn.DataParallel(AttackNet(noise_type=opt.noise_type)).cuda()
 
@@ -150,9 +161,9 @@ def main(num_saves=1):
 
     loss_fn_alex = LPIPS(net='alex')
     print("Hiding secrets and calculating metrics...")
-    for i, (secret, cover) in enumerate(zip(loader_secret, loader_cover), start=1):
+    for i, (secret, cover) in tqdm(enumerate(zip(loader_secret, loader_cover), start=1)):
         cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, opt.cover_dependent, opt.use_key)
+            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, opt.cover_dependent, opt.use_key, Enet)
 
         cover, container = cover.detach().cpu(), container.detach().cpu()
         for j in range(opt.num_secrets):
@@ -184,10 +195,10 @@ def main(num_saves=1):
         for j in range(opt.num_secrets):
             show_all = torch.cat((show_all, secret_set[j].repeat(1, 3//opt.channel_secret, 1, 1), rev_secret_set[j].repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
         if opt.use_key:
-            show_all = torch.cat((show_all, (rev_secret_*30).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
+            show_all = torch.cat((show_all, (rev_secret_*50).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
 
         if i <= num_saves:
-            save_path = '%s/hiding_%02d_secrets_modified_%03d_bits.png' % (opt.analysis_pics_save_dir, opt.num_secrets, opt.modified_bits)
+            save_path = '%s/hiding_%02d_secrets_modified_%03d_bits%d.png' % (opt.analysis_pics_save_dir, opt.num_secrets, opt.modified_bits, i)
             grid = vutils.make_grid(show_all, nrow=opt.batch_size, padding=1, normalize=False)
             ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
             im = Image.fromarray(ndarr)
@@ -202,4 +213,4 @@ def main(num_saves=1):
 
 
 if __name__ == '__main__':
-    main(num_saves=1)
+    main(num_saves=3)

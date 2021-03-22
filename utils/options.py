@@ -39,10 +39,10 @@ parser.add_argument('--loss', type=str, default='l2', help='loss function [l1 | 
 parser.add_argument('--num_secrets', type=int, default=1, help='the number of secret images to be hidden')
 
 # training parameters
-parser.add_argument('--epochs', type=int, default=50, help='epochs for training')
+parser.add_argument('--epochs', type=int, default=80, help='epochs for training')
 parser.add_argument('--batch_size', type=int, default=25, help='batch size')
-parser.add_argument('--beta', type=float, default=1.0, help='weight of secret reveal')
-parser.add_argument('--gamma', type=float, default=1.5, help='weight of fake_key reveal')
+parser.add_argument('--beta', type=float, default=0.75, help='weight of secret reveal')
+parser.add_argument('--gamma', type=float, default=0.5, help='weight of fake_key reveal')
 parser.add_argument('--delta', type=float, default=0.001, help='weight of adversarial classfication')
 parser.add_argument('--lr', type=float, default=0.001, help='learning rate')
 parser.add_argument('--lr_decay_freq', type=int, default=30, help='frequency of decaying lr')

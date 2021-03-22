@@ -159,7 +159,7 @@ def save_result_pic(batch_size, cover, container, secret_set, rev_secret_set, re
         show_all = torch.cat((show_cover, show_secret), dim=0)
     else:
         rev_secret_ = rev_secret_.repeat(1, 3//opt.channel_secret, 1, 1)
-        show_all = torch.cat((show_cover, show_secret, (rev_secret_*30).clamp_(0.0, 1.0)), dim=0)
+        show_all = torch.cat((show_cover, show_secret, (rev_secret_*50).clamp_(0.0, 1.0)), dim=0)
 
     # vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
     grid = vutils.make_grid(show_all, nrow=batch_size, padding=1, normalize=False)
@@ -378,7 +378,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
                 = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, Enet)
             
             if Adversary is not None:
-                criterion_adv = nn.BCEWithLogitsLoss().cuda()
+                criterion_adv = nn.MSELoss().cuda()
                 TRUE, FALSE = torch.ones(batch_size, 1).cuda(), torch.zeros(batch_size, 1).cuda()
                 loss_adv = criterion_adv(Adversary(cover), TRUE) + criterion_adv(Adversary(container.detach()), FALSE)
                 Alosses_.update(loss_adv.item(), batch_size)
