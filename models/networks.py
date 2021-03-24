@@ -257,10 +257,16 @@ class AdversarialNet(nn.Module):
         return X
 
 
-class FC(nn.Module):
-    def __init__(self, in_features, out_features):
-        super(FC, self).__init__()
-        self.linear = nn.Linear(in_features, out_features)
+class EncodingNet(nn.Module):
+    def __init__(self, key_len, key_channel, redundance, batch_size):
+        super(EncodingNet, self).__init__()
+        self.key_len, self.key_channel, self.redundance, self.batch_size = key_len, key_channel, redundance, batch_size
+        if redundance != -1:
+            self.linear = nn.Linear(key_len, key_channel*redundance*redundance)
 
     def forward(self, X):
-        return self.linear(X)
+        if self.redundance != -1:
+            X = self.linear(X)
+            return X.view(1, self.key_channel, self.redundance, self.redundance).repeat(self.batch_size, 1, self.key_len//self.redundance, self.key_len//self.redundance)
+        else:
+            return X.view(1, 1, 1, self.key_len).repeat(self.batch_size, self.key_channel, self.key_len, 1)

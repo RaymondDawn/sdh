@@ -225,7 +225,7 @@ def adjust_learning_rate(optimizer, epoch, decay_num=2):
         param_group['lr'] = lr
 
 
-def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key=True, Enet=None):
+def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -238,29 +238,28 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
         Enet (nn.Module or None)    -- a fully connected layer or `None`
     """
     cover, secret = cover.cuda(), secret.cuda()
-    b, c, h, w = cover.shape
+    (b, c, h, w), (_, c_s, h_s, w_s) = cover.shape, secret.shape
+    assert h == h_s and w == w_s
+    
     secret_set, rev_secret_set = [], []
     for i in range(opt.num_secrets):
         secret_set.append(secret[b*i:b*(i+1), :, :, :])
 
+    # pre-processing for key(s)
     if use_key:
         key_set, red_key_set = [], []
         for i in range(opt.num_secrets):
-            key_set.append(torch.Tensor([float(torch.randn(1)<0) for __ in range(w)]).cuda())
+            key_set.append(torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda())
         fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
         # assert fake_key is different from every key
         for key in key_set:
             while torch.equal(fake_key, key):
                 fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
 
-        if Enet is None:
-            for key in key_set:
-                red_key_set.append(key.view(1, 1, 1, w).repeat(b, opt.channel_key, h, 1))
-            red_fake_key = fake_key.view(1, 1, 1, w).repeat(b, opt.channel_key, h, 1)
-        else:
-            for key in key_set:
-                red_key_set.append(Enet(key).view(1, opt.channel_key, opt.redundance, opt.redundance).repeat(b, 1, h//opt.redundance, w//opt.redundance))
-            red_fake_key = Enet(fake_key).view(1, opt.channel_key, opt.redundance, opt.redundance).repeat(b, 1, h//opt.redundance, w//opt.redundance)
+        # redundance for key(s)
+        for key in key_set:
+            red_key_set.append(Enet(key))
+        red_fake_key = Enet(fake_key)
         zeros = torch.zeros(red_key_set[0].shape).cuda()
 
     if cover_dependent:
@@ -269,14 +268,18 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
             for i in range(opt.num_secrets):
                 H_input = torch.cat((H_input, secret_set[i], red_key_set[i]), dim=1)
         else:
-            H_input = torch.cat((cover, secret), dim=1)
+            H_input = cover
+            for i in range(opt.num_secrets):
+                H_input = torch.cat((H_input, secret_set[i]), dim=1)
     else:
         if use_key:
             H_input = torch.cat((secret_set[0], red_key_set[0]), dim=1)
             for i in range(1, opt.num_secrets):
                 H_input = torch.cat((H_input, secret_set[i], red_key_set[i]), dim=1)
         else:
-            H_input = secret
+            H_input = secret_set[0]
+            for i in range(1, opt.num_secrets):
+                H_input = torch.cat((H_input, secret_set[i]), dim=1)
     H_output = Hnet(H_input)
 
     if cover_dependent:
@@ -287,25 +290,24 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
 
     container = NoiseLayers(container)
 
+    R_loss = 0
     if use_key:
-        R_loss = 0
         for i in range(opt.num_secrets):
             # modify key to test the sensitivity
             bits = opt.modified_bits
-            key_ = copy.deepcopy(key_set[i])
+            key_ = key_set[i]
             for j in range(bits):
                 index = (j + int(np.random.rand() * 128)) % 128
                 key_[index] = -key_[index] + 1  # 0->1; 1->0
-            if Enet is None:
-                red_key_ = key_.view(1, 1, 1, w).repeat(b, opt.channel_key, h, 1)
-            else:
-                red_key_ = Enet(key_).view(1, opt.channel_key, opt.redundance, opt.redundance).repeat(b, 1, h//opt.redundance, w//opt.redundance)
+            red_key_ = Enet(key_)
             rev_secret_set.append(Rnet(torch.cat((container, red_key_), dim=1)))
             R_loss += criterion(rev_secret_set[i], secret_set[i])
-        R_loss /= opt.num_secrets
     else:
-        rev_secret_set.append(Rnet(container))
-        R_loss = criterion(secret_set[0], rev_secret_set[0])
+        R_output = Rnet(container)
+        for i in range(opt.num_secrets):
+            rev_secret_set.append(R_output[:, c_s*i:c_s*(i+1), :, :])
+            R_loss += criterion(secret_set[i], rev_secret_set[i])
+    R_loss /= opt.num_secrets
 
     if use_key:
         rev_secret_ = Rnet(torch.cat((container, red_fake_key), dim=1))
@@ -316,18 +318,15 @@ def forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_depend
 
     # L1 metric (APD)
     H_diff = (container - cover).abs().mean() * 255
-    if use_key:
-        R_diff = 0
-        for i in range(opt.num_secrets):
-            R_diff += (rev_secret_set[i] - secret_set[i]).abs().mean() * 255
-        R_diff /= opt.num_secrets
-    else:
-        R_diff = (rev_secret_set[0] - secret_set[0]).abs().mean() * 255
+    R_diff = 0
+    for i in range(opt.num_secrets):
+        R_diff += (rev_secret_set[i] - secret_set[i]).abs().mean() * 255
+    R_diff /= opt.num_secrets
 
     return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
 
 
-def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key, Adversary=None, optimizer_adv=None, Enet=None):
+def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, Enet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key, Adversary=None, optimizer_adv=None):
     """Train Hnet and Rnet and schedule learning rate by the validation results.
     
     Parameters:
@@ -375,7 +374,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_size = opt.batch_size
 
             cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-                = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, Enet)
+                = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key)
             
             if Adversary is not None:
                 criterion_adv = nn.MSELoss().cuda()
@@ -457,7 +456,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         save_loss_pic(h_losses_list, r_losses_list, r_losses_list_, opt.loss_save_path)
 
         val_hloss, val_rloss, val_rloss_, val_hdiff, val_rdiff, val_rdiff_ \
-            = inference(val_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, save_num=1, mode='val', epoch=epoch, Enet=Enet)
+            = inference(val_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key, save_num=1, mode='val', epoch=epoch)
 
         scheduler.step(val_rloss)
 
@@ -468,51 +467,30 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         state = 'best' if is_best else 'newest'
         print_log("Save the %s checkpoint: epoch%03d" % (state, epoch))
         if Adversary is not None:
-            if Enet is not None:
-                save_checkpoint(
-                    {
-                        'epoch': epoch+1,
-                        'H_state_dict': Hnet.state_dict(),
-                        'R_state_dict': Rnet.state_dict(),
-                        'E_state_dict': Enet.state_dict(),
-                        'Adversary_state_dict': Adversary.state_dict(),
-                        'optimizer': optimizer.state_dict()
-                    }, is_best=is_best
-                )
-            else:
-                save_checkpoint(
-                    {
-                        'epoch': epoch+1,
-                        'H_state_dict': Hnet.state_dict(),
-                        'R_state_dict': Rnet.state_dict(),
-                        'Adversary_state_dict': Adversary.state_dict(),
-                        'optimizer': optimizer.state_dict()
-                    }, is_best=is_best
-                )
+            save_checkpoint(
+                {
+                    'epoch': epoch+1,
+                    'H_state_dict': Hnet.state_dict(),
+                    'R_state_dict': Rnet.state_dict(),
+                    'E_state_dict': Enet.state_dict(),
+                    'Adversary_state_dict': Adversary.state_dict(),
+                    'optimizer': optimizer.state_dict()
+                }, is_best=is_best
+            )
         else:
-            if Enet is not None:
-                save_checkpoint(
-                    {
-                        'epoch': epoch+1,
-                        'H_state_dict': Hnet.state_dict(),
-                        'R_state_dict': Rnet.state_dict(),
-                        'E_state_dict': Enet.state_dict(),
-                        'optimizer': optimizer.state_dict()
-                    }, is_best=is_best
-                )
-            else:
-                save_checkpoint(
-                    {
-                        'epoch': epoch+1,
-                        'H_state_dict': Hnet.state_dict(),
-                        'R_state_dict': Rnet.state_dict(),
-                        'optimizer': optimizer.state_dict()
-                    }, is_best=is_best
-                )
+            save_checkpoint(
+                {
+                    'epoch': epoch+1,
+                    'H_state_dict': Hnet.state_dict(),
+                    'R_state_dict': Rnet.state_dict(),
+                    'E_state_dict': Enet.state_dict(),
+                    'optimizer': optimizer.state_dict()
+                }, is_best=is_best
+            )
     print("######## TRAIN END ########")
 
 
-def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, save_num=1, mode='test', epoch=None, Enet=None):
+def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key, save_num=1, mode='test', epoch=None):
     """Validate or test the performance of Hnet and Rnet.
 
     Parameters:
@@ -543,7 +521,7 @@ def inference(data_loader, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, 
 
     for i, (secret, cover) in enumerate(data_loader, start=1):
         cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, cover_dependent, use_key, Enet)
+            = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key)
 
         Hlosses.update(H_loss.item(), batch_size)
         Rlosses.update(R_loss.item(), batch_size)

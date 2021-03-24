@@ -128,11 +128,8 @@ def main():
         output_function='sigmoid'
     )
 
-    if opt.redundance != -1:
-        Enet = FC(opt.image_size, opt.channel_key*opt.redundance*opt.redundance)
-        Enet = torch.nn.DataParallel(Enet).cuda()
-    else:
-        Enet = None
+    Enet = EncodingNet(opt.image_size, opt.channel_key, opt.redundance, opt.batch_size)
+    Enet = torch.nn.DataParallel(Enet).cuda()
 
     Hnet.apply(weights_init)
     Rnet.apply(weights_init)
@@ -206,9 +203,9 @@ def main():
             # zip loader in train()
             train_loader_secret, train_loader_cover,
             val_loader_secret, val_loader_cover,
-            Hnet, Rnet, NoiseLayers,
+            Hnet, Rnet, Enet, NoiseLayers,
             optimizer, scheduler, criterion,
-            opt.cover_dependent, opt.use_key, Adversary, optimizer_adv, Enet
+            opt.cover_dependent, opt.use_key, Adversary, optimizer_adv
         )
     else:
         print("Making test dataloader...")
@@ -227,9 +224,9 @@ def main():
 
         test_loader = zip(test_loader_secret, test_loader_cover)
         inference(
-            test_loader, Hnet, Rnet, NoiseLayers,
+            test_loader, Hnet, Rnet, Enet, NoiseLayers,
             criterion, opt.cover_dependent, opt.use_key,
-            save_num=1, mode='test', epoch=None, Enet=Enet
+            save_num=1, mode='test', epoch=None
         )
 
 

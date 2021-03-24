@@ -120,11 +120,8 @@ def main(num_saves=1):
         output_function='sigmoid'
     )
 
-    if opt.redundance != -1:
-        Enet = FC(opt.image_size, opt.channel_key*opt.redundance*opt.redundance)
-        Enet = torch.nn.DataParallel(Enet).cuda()
-    else:
-        Enet = None
+    Enet = EncodingNet(opt.image_size, opt.channel_key, opt.redundance, opt.batch_size)
+    Enet = torch.nn.DataParallel(Enet).cuda()
 
     Hnet.apply(weights_init)
     Rnet.apply(weights_init)
@@ -163,7 +160,7 @@ def main(num_saves=1):
     print("Hiding secrets and calculating metrics...")
     for i, (secret, cover) in tqdm(enumerate(zip(loader_secret, loader_cover), start=1)):
         cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret, cover, Hnet, Rnet, NoiseLayers, criterion, opt.cover_dependent, opt.use_key, Enet)
+            = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, opt.cover_dependent, opt.use_key)
 
         cover, container = cover.detach().cpu(), container.detach().cpu()
         for j in range(opt.num_secrets):
