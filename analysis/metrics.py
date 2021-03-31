@@ -132,8 +132,6 @@ def main(num_saves=1):
         checkpoint = torch.load(opt.checkpoint_path)
         Hnet.load_state_dict(checkpoint['H_state_dict'])
         Rnet.load_state_dict(checkpoint['R_state_dict'])
-        if opt.adversary:
-            Adversary.load_state_dict(checkpoint['Adversary_state_dict'])
         if opt.redundance != -1:
             Enet.load_state_dict(checkpoint['E_state_dict'])
 
@@ -181,9 +179,9 @@ def main(num_saves=1):
         H_PSNR.update(h_psnr, batch_size)
         H_SSIM.update(h_ssim, batch_size)
         H_LPIPS.update(h_lpips, batch_size)
-        R_PSNR.update(r_psnr, batch_size*opt.num_secrets)
-        R_SSIM.update(r_ssim, batch_size*opt.num_secrets)
-        R_LPIPS.update(r_lpips, batch_size*opt.num_secrets)
+        R_PSNR.update(r_psnr/opt.num_secrets, batch_size)
+        R_SSIM.update(r_ssim/opt.num_secrets, batch_size)
+        R_LPIPS.update(r_lpips/opt.num_secrets, batch_size)
         if opt.use_key:
             R_APD_.update(R_diff_.item(), batch_size)
 
