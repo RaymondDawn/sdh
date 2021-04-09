@@ -225,7 +225,7 @@ def adjust_learning_rate(optimizer, epoch, decay_num=2):
         param_group['lr'] = lr
 
 
-def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True, epoch=None, midified_bits=None):
+def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True, epoch=None, modified_bits=None):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -271,13 +271,13 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
                             fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
             else:  # in metrics
                 fake_key, s = key_set[0].clone(), set()
-                    bits = modified_bits
-                    for j in range(bits):
+                bits = modified_bits
+                for j in range(bits):
+                    index = (j + int(np.random.rand() * 128)) % 128
+                    while index in s:
                         index = (j + int(np.random.rand() * 128)) % 128
-                        while index in s:
-                            index = (j + int(np.random.rand() * 128)) % 128
-                        s.add(index)
-                        fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
+                    s.add(index)
+                    fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
         else: # stair strategy
             assert (opt.num_secrets == 1) and (epoch is not None)
             fake_key, s = key_set[0].clone(), set()
