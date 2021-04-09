@@ -1,6 +1,5 @@
 import os
 import time
-import copy
 import hashlib
 from PIL import Image
 import matplotlib.pyplot as plt
@@ -15,6 +14,7 @@ from skimage.metrics import structural_similarity as _SSIM
 from .options import opt, parser
 from .image_folder import ImageFolder
 
+MODIFIED_BITS = [128,96,80,64,48,32,16,8]  # length: 8
 
 class AverageMeter(object):
     """Computes and stores the average and current value."""
@@ -225,7 +225,7 @@ def adjust_learning_rate(optimizer, epoch, decay_num=2):
         param_group['lr'] = lr
 
 
-def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True):
+def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True, epoch=None):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -245,16 +245,43 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
     for i in range(opt.num_secrets):
         secret_set.append(secret[b*i:b*(i+1), :, :, :])
 
+    count_diff = 0
     # pre-processing for key(s)
     if use_key:
         key_set, red_key_set = [], []
         for i in range(opt.num_secrets):
             key_set.append(torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda())
-        fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
-        # assert fake_key is different from every key
-        for key in key_set:
-            while torch.equal(fake_key, key):
+        
+        if not opt.stage_modification:
+            if opt.num_secrets == 1:
+                fake_key, s = key_set[0].clone(), set()
+                bits = np.random.randint(8, 129)  # random stragety
+                for j in range(bits):
+                    index = (j + int(np.random.rand() * 128)) % 128
+                    while index in s:
+                        index = (j + int(np.random.rand() * 128)) % 128
+                    s.add(index)
+                    fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
+            else:  # random generated
                 fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
+                # assert fake_key is different from every key
+                for key in key_set:
+                    while torch.equal(fake_key, key):
+                        fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
+        else: # stair strategy
+            assert (opt.num_secrets == 1) and (epoch is not None)
+            fake_key, s = key_set[0].clone(), set()
+            bits = MODIFIED_BITS[epoch//10]
+            for j in range(bits):
+                index = (j + int(np.random.rand() * 128)) % 128
+                while index in s:
+                    index = (j + int(np.random.rand() * 128)) % 128
+                s.add(index)
+                fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
+
+        if opt.num_secrets == 1:
+            for i in range(128):
+                count_diff += int(key_set[0][i] != fake_key[i])
 
         # redundance for key(s)
         for key in key_set:
@@ -295,9 +322,12 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         for i in range(opt.num_secrets):
             # modify key to test the sensitivity
             bits = opt.modified_bits
-            key_ = key_set[i]
+            key_, s = key_set[i], set()
             for j in range(bits):
                 index = (j + int(np.random.rand() * 128)) % 128
+                while index in s:
+                    index = (j + int(np.random.rand() * 128)) % 128
+                s.add(index)
                 key_[index] = -key_[index] + 1  # 0->1; 1->0
             red_key_ = Enet(key_)
             rev_secret_set.append(Rnet(torch.cat((container, red_key_), dim=1)))
@@ -323,7 +353,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         R_diff += (rev_secret_set[i] - secret_set[i]).abs().mean() * 255
     R_diff /= opt.num_secrets
 
-    return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_
+    return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff
 
 
 def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, Enet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key, Adversary=None, optimizer_adv=None):
@@ -345,7 +375,9 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
     MIN_LOSS = float('inf')
     h_losses_list, r_losses_list, r_losses_list_ = [], [], []
     print("######## TRAIN BEGIN ########")
-    for epoch in range(opt.epochs):
+    for epoch in range(opt.start_epoch, opt.epochs):
+        if opt.start_epoch != 0:
+            assert opt.load_checkpoint and 'newest' in opt.checkpoint_type
         adjust_learning_rate(optimizer, epoch)
         # must zip in epoch's iteration
         train_loader = zip(train_loader_secret, train_loader_cover)
@@ -363,6 +395,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
         Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
         Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeors)
+        Count = AverageMeter()
         # turn on training mode
         Hnet.train()
         Rnet.train()
@@ -373,8 +406,8 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             data_time.update(time.time() - start_time)
             batch_size = opt.batch_size
 
-            cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-                = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key)
+            cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff \
+                = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key, epoch)
             
             if Adversary is not None:
                 criterion_adv = nn.MSELoss().cuda()
@@ -390,6 +423,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             Rlosses.update(R_loss.item(), batch_size)
             Hdiff.update(H_diff.item(), batch_size)
             Rdiff.update(R_diff.item(), batch_size)
+            Count.update(count_diff, 1)
             if use_key:
                 Rlosses_.update(R_loss_.item(), batch_size)
                 Rdiff_.update(R_diff_.item(), batch_size)
@@ -411,11 +445,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_time.update(time.time() - start_time)
             start_time = time.time()
 
-            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tA_loss: %.6f A_loss_: %.6f\tdata_time: %.4f batch_time: %.4f" % (
+            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tA_loss: %.6f A_loss_: %.6f\tCount: %.4f\tdata_time: %.4f batch_time: %.4f" % (
                 epoch, opt.epochs, i, opt.iters_per_epoch,
                 Hlosses.val, Rlosses.val, Rlosses_.val,
                 Hdiff.val, Rdiff.val, Rdiff_.val,
-                Alosses.val, Alosses_.val,
+                Alosses.val, Alosses_.val, Count.val,
                 data_time.val, batch_time.val
             )
 
@@ -439,11 +473,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             epoch, i,
             opt.train_pics_save_dir
         )
-        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tALoss=%.6f\tALoss_=%.6f\tlr= %.6f\tEpoch Time=%.4f" % (
+        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tALoss=%.6f\tALoss_=%.6f\tCount=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch, SumLosses.avg,
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
             Hdiff.avg, Rdiff.avg, Rdiff_.avg,
-            Alosses.avg, Alosses_.avg,
+            Alosses.avg, Alosses_.avg, Count.avg,
             optimizer.param_groups[0]['lr'],
             batch_time.sum
         )
@@ -514,19 +548,21 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
     Hdiff = AverageMeter()       # APD for hiding network (between container and cover)
     Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
     Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeros)
+    Count = AverageMeter()
 
     # turn on val mode
     Hnet.eval()
     Rnet.eval()
 
     for i, (secret, cover) in enumerate(data_loader, start=1):
-        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_ \
-            = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key)
+        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff \
+            = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key, epoch)
 
         Hlosses.update(H_loss.item(), batch_size)
         Rlosses.update(R_loss.item(), batch_size)
         Hdiff.update(H_diff.item(), batch_size)
         Rdiff.update(R_diff.item(), batch_size)
+        Count.update(count_diff, 1)
         if use_key:
             Rlosses_.update(R_loss_.item(), batch_size)
             Rdiff_.update(R_diff_.item(), batch_size)
@@ -550,15 +586,15 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
                 )
 
     if mode == 'test':
-        log = 'Test\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f' % (
+        log = 'Test\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tCount=%.4f' % (
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
-            Hdiff.avg, Rdiff.avg, Rdiff_.avg
+            Hdiff.avg, Rdiff.avg, Rdiff_.avg, Count.avg
         )
     else:
-        log = 'Validation[%02d]\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f' % (
+        log = 'Validation[%02d]\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tCount=%.4f' % (
             epoch,
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
-            Hdiff.avg, Rdiff.avg, Rdiff_.avg
+            Hdiff.avg, Rdiff.avg, Rdiff_.avg, Count.avg
         )
     print_log(log)
     print("#### %s end ####\n" % mode)

@@ -40,6 +40,7 @@ parser.add_argument('--num_secrets', type=int, default=1, help='the number of se
 
 # training parameters
 parser.add_argument('--epochs', type=int, default=80, help='epochs for training')
+parser.add_argument('--start_epoch', type=int, default=0, help='the start epoch to continue training')
 parser.add_argument('--batch_size', type=int, default=25, help='batch size')
 parser.add_argument('--beta', type=float, default=0.75, help='weight of secret reveal')
 parser.add_argument('--gamma', type=float, default=0.5, help='weight of fake_key reveal')
@@ -49,6 +50,7 @@ parser.add_argument('--lr_decay_freq', type=int, default=30, help='frequency of 
 parser.add_argument('--iters_per_epoch', type=int, default=1000, help='number of iterations in one epoch')
 parser.add_argument('--noise_type', type=str, default='identity', help='type of distortion [identity | noise | blur | resize | jpeg | combine]')
 parser.add_argument('--adversary', action='store_true', help='use adversarial structure')
+parser.add_argument('--stage_modification', action='store_true', help='a type of fake key')
 
 # additional parameters
 parser.add_argument('--test', action='store_true', help='test mode')
