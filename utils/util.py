@@ -225,7 +225,7 @@ def adjust_learning_rate(optimizer, epoch, decay_num=2):
         param_group['lr'] = lr
 
 
-def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True, epoch=None, modified_bits=None):
+def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key=True, epoch=None, modified_bits=opt.modified_bits):
     """Forward propagation for hiding and reveal network and calculate losses and APD.
     
     Parameters:
@@ -253,31 +253,21 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
             key_set.append(torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda())
         
         if not opt.stage_modification:
-            if modified_bits is None:
-                if opt.num_secrets == 1:
-                    fake_key, s = key_set[0].clone(), set()
-                    bits = np.random.randint(8, 129)  # random stragety
-                    for j in range(bits):
-                        index = (j + int(np.random.rand() * 128)) % 128
-                        while index in s:
-                            index = (j + int(np.random.rand() * 128)) % 128
-                        s.add(index)
-                        fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
-                else:  # random generated
-                    fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
-                    # assert fake_key is different from every key
-                    for key in key_set:
-                        while torch.equal(fake_key, key):
-                            fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
-            else:  # in metrics
+            if opt.num_secrets == 1:
                 fake_key, s = key_set[0].clone(), set()
-                bits = modified_bits
+                bits = np.random.randint(60,69)  # random stragety
                 for j in range(bits):
                     index = (j + int(np.random.rand() * 128)) % 128
                     while index in s:
                         index = (j + int(np.random.rand() * 128)) % 128
                     s.add(index)
                     fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
+            else:  # random generated
+                fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
+                # assert fake_key is different from every key
+                for key in key_set:
+                    while torch.equal(fake_key, key):
+                        fake_key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
         else: # stair strategy
             assert (opt.num_secrets == 1) and (epoch is not None)
             fake_key, s = key_set[0].clone(), set()
@@ -331,7 +321,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
     if use_key:
         for i in range(opt.num_secrets):
             # modify key to test the sensitivity
-            bits = opt.modified_bits
+            bits = modified_bits
             key_, s = key_set[i], set()
             for j in range(bits):
                 index = (j + int(np.random.rand() * 128)) % 128
