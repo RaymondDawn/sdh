@@ -255,7 +255,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         if not opt.stage_modification:
             if opt.num_secrets == 1:
                 fake_key, s = key_set[0].clone(), set()
-                bits = np.random.randint(60,69)  # random stragety
+                bits = np.random.randint(8,129)  # random stragety
                 for j in range(bits):
                     index = (j + int(np.random.rand() * 128)) % 128
                     while index in s:

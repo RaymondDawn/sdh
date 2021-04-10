@@ -1,7 +1,43 @@
+import random
 import itertools
+
 import numpy as np
+import cv2
 import torch
 from torch import nn
+
+
+def get_rand_homography_mat(img_size, eps, batch_size):
+    res = np.zeros((batch_size, 2, 3, 3))
+
+    for i in range(batch_size):
+        top_left_x = random.uniform(-eps, eps)     
+        top_left_y = random.uniform(-eps, eps)    
+        bottom_left_x = random.uniform(-eps, eps)
+        bottom_left_y = random.uniform(-eps, eps)    
+        top_right_x = random.uniform(-eps, eps)     
+        top_right_y = random.uniform(-eps, eps)   
+        bottom_right_x = random.uniform(-eps, eps)  
+        bottom_right_y = random.uniform(-eps, eps) 
+
+        rect = np.array([
+            [top_left_x, top_left_y],
+            [top_right_x + img_size, top_right_y],
+            [bottom_right_x + img_size, bottom_right_y + img_size],
+            [bottom_left_x, bottom_left_y +  img_size]], dtype = "float32")
+
+        dst = np.array([
+            [0, 0],
+            [img_size, 0],
+            [img_size, img_size],
+            [0, img_size]], dtype = "float32")
+
+        res_i = cv2.getPerspectiveTransform(rect, dst)
+        res_i_inv = np.linalg.inv(res_i)
+
+        res[i, 0] = res_i
+        res[i, 1] = res_i_inv
+    return res
 
 
 y_table = np.array(
@@ -20,16 +56,18 @@ c_table = nn.Parameter(torch.from_numpy(c_table)).cuda()
 
 
 def diff_round(x):
+    # Differentiable rounding function
     return torch.round(x) + (x - torch.round(x))**3
 
 def quality_to_factor(quality):
+    # Calculate factor corresponding to quality
     if quality < 50:
         quality = 5000. / quality
     else:
         quality = 200. - quality*2
     return quality / 100.
 
-
+# 1. RGB -> YCbCr
 class rgb_to_ycbcr_jpeg(nn.Module):
     """Converts RGB image to YCbCr.
     
@@ -53,7 +91,7 @@ class rgb_to_ycbcr_jpeg(nn.Module):
         result.view(image.shape)
         return result
 
-
+# 2. Chroma subsampling
 class chroma_subsampling(nn.Module):
     """Chroma subsampling on CbCv channels.
     
@@ -77,7 +115,7 @@ class chroma_subsampling(nn.Module):
         cr = cr.permute(0, 2, 3, 1)
         return image[:, :, :, 0], cb.squeeze(3), cr.squeeze(3)
 
-
+# 3. Block splitting
 class block_splitting(nn.Module):
     """Splitting image into patches.
     
@@ -97,7 +135,7 @@ class block_splitting(nn.Module):
         image_transposed = image_reshaped.permute(0, 1, 3, 2, 4)
         return image_transposed.contiguous().view(batch_size, -1, self.k, self.k)
     
-
+# 4. DCT
 class dct_8x8(nn.Module):
     """Discrete Cosine Transformation.
     
@@ -123,7 +161,7 @@ class dct_8x8(nn.Module):
         result.view(image.shape)
         return result
 
-
+# 5. Quantization
 class y_quantize(nn.Module):
     """JPEG Quantization for Y channel.
     
@@ -204,7 +242,7 @@ class compress_jpeg(nn.Module):
 
         return components['y'], components['cb'], components['cr']
 
-
+# -5. Dequantization
 class y_dequantize(nn.Module):
     """Dequantize Y channel.
     
@@ -240,7 +278,7 @@ class c_dequantize(nn.Module):
     def forward(self, image):
         return image * (self.c_table * self.factor)
 
-
+# -4. Inverse DCT
 class idct_8x8(nn.Module):
     """Inverse discrete Cosine Transformation.
     
@@ -266,7 +304,7 @@ class idct_8x8(nn.Module):
         result.view(image.shape)
         return result
 
-
+# -3. Block joining
 class block_merging(nn.Module):
     """Merge pathces into image.
     
@@ -287,7 +325,7 @@ class block_merging(nn.Module):
         image_transposed = image_reshaped.permute(0, 1, 3, 2, 4)
         return image_transposed.contiguous().view(batch_size, height, width)
 
-
+# -2. Chroma upsampling
 class chroma_upsampling(nn.Module):
     """Upsample chroma layers.
     
@@ -314,7 +352,7 @@ class chroma_upsampling(nn.Module):
         
         return torch.cat([y.unsqueeze(3), cb.unsqueeze(3), cr.unsqueeze(3)], dim=3)
 
-
+# -1: YCbCr -> RGB
 class ycbcr_to_rgb_jpeg(nn.Module):
     """Converts YCbCr image to RGB JPEG.
     

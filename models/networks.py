@@ -199,6 +199,7 @@ class AttackNet(nn.Module):
         self.gaussian_blur = GaussianBlur()
         self.resize = Resize()
         self.jpeg = DiffJPEG()
+        self.lfm = LFM()
 
     def forward(self, X):
         b, _, _, _ = X.shape
@@ -220,6 +221,8 @@ class AttackNet(nn.Module):
                 X_noise = self.resize(X)
             elif self.noise_type == 'jpeg':
                 X_noise = self.jpeg(X)
+            elif self.noise_type == 'lfm':
+                X_noise = self.lfm(X)
             else:
                 NotImplementedError('noise type [%s] is not found' % self.noise_type)
             return X_noise

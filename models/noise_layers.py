@@ -3,7 +3,9 @@ import skimage
 import torch
 from torch import nn
 
-from .jpeg_utils import *
+import torchgeometry as tgm
+
+from .utils import *
 
 
 class Identity(nn.Module):
@@ -72,7 +74,7 @@ class Resize(nn.Module):
 
 
 class DiffJPEG(nn.Module):
-    def __init__(self, h=128, w=128, differentiable=True, quality=50):
+    def __init__(self, h=128, w=128, differentiable=True, quality=80):
         super(DiffJPEG, self).__init__()
         if differentiable:
             rounding = diff_round
@@ -85,3 +87,20 @@ class DiffJPEG(nn.Module):
     def forward(self, x):
         y, cb, cr = self.compress(x)
         return self.decompress(y, cb, cr)
+
+
+class LFM(nn.Module):
+    def __init__(self, image_size=128, batch_size=25):
+        super(LFM, self).__init__()
+        self.image_size = image_size
+        self.std_noise = (torch.rand(1)*0.05).item()
+        self.homography = get_rand_homography_mat(image_size, image_size*0.1, batch_size)
+        self.homography = torch.from_numpy(self.homography).float().cuda()
+
+    def forward(self, x):
+        noise = torch.randn_like(x) * self.std_noise
+        x = x + noise
+        x = tgm.warp_perspective(x, self.homography[:, 1], (self.image_size, self.image_size))
+        x = tgm.warp_perspective(x, self.homography[:, 0], (self.image_size, self.image_size))
+
+        return x
