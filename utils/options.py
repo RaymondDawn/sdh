@@ -51,6 +51,7 @@ parser.add_argument('--iters_per_epoch', type=int, default=1000, help='number of
 parser.add_argument('--noise_type', type=str, default='identity', help='type of distortion [identity | noise | blur | resize | jpeg | combine]')
 parser.add_argument('--adversary', action='store_true', help='use adversarial structure')
 parser.add_argument('--stage_modification', action='store_true', help='a type of fake key')
+parser.add_argument('--static_key', action='store_true', help='use s static key')
 
 # additional parameters
 parser.add_argument('--test', action='store_true', help='test mode')

@@ -38,8 +38,9 @@ def md5(key: str) -> torch.Tensor:
     """Hash and binarize the key by MD5 algorithm."""
     hash_key = hashlib.md5(key.encode(encoding='UTF-8')).digest()
     binary_key = ''.join(format(x, '08b') for x in hash_key)
-    tensor_key = torch.Tensor([float(x) for x in binary_key])
+    tensor_key = torch.Tensor([float(x) for x in binary_key]).cuda()
     return tensor_key
+STATIC_KEYS = [md5("hello world!")]
 
 
 def weights_init(m):
@@ -249,8 +250,12 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
     # pre-processing for key(s)
     if use_key:
         key_set, red_key_set = [], []
-        for i in range(opt.num_secrets):
-            key_set.append(torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda())
+        if opt.static_key:
+            assert len(STATIC_KEYS) == opt.num_secrets
+            key_set = STATIC_KEYS
+        else:
+            for i in range(opt.num_secrets):
+                key_set.append(torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda())
         
         if not opt.stage_modification:
             if opt.num_secrets == 1:
@@ -322,7 +327,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         for i in range(opt.num_secrets):
             # modify key to test the sensitivity
             bits = modified_bits
-            key_, s = key_set[i], set()
+            key_, s = key_set[i].clone(), set()
             for j in range(bits):
                 index = (j + int(np.random.rand() * 128)) % 128
                 while index in s:
