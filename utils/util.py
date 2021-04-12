@@ -382,7 +382,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
     print("######## TRAIN BEGIN ########")
     for epoch in range(opt.start_epoch, opt.epochs):
         if opt.start_epoch != 0:
-            assert opt.load_checkpoint and 'newest' in opt.checkpoint_type
+            assert opt.load_checkpoint
         adjust_learning_rate(optimizer, epoch)
         # must zip in epoch's iteration
         train_loader = zip(train_loader_secret, train_loader_cover)
