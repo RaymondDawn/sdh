@@ -594,7 +594,7 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
         Count.update(count_diff, 1)
         if opt.explicit:
             KeyLoss.update(key_loss.item(), batch_size)
-        if use_key:
+        if use_key and not opt.explicit:
             Rlosses_.update(R_loss_.item(), batch_size)
             Rdiff_.update(R_diff_.item(), batch_size)
 
