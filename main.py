@@ -116,7 +116,7 @@ def main():
     if opt.use_key:
         Rnet = RevealNet(
             input_nc=opt.channel_cover+opt.channel_key,
-            output_nc=opt.channel_secret,
+            output_nc=opt.channel_secret+int(opt.explicit),
             norm_type=opt.norm_type,
             output_function='sigmoid'
         )

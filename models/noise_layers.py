@@ -3,8 +3,6 @@ import skimage
 import torch
 from torch import nn
 
-import torchgeometry as tgm
-
 from .utils import *
 
 
@@ -98,6 +96,7 @@ class LFM(nn.Module):
         self.homography = torch.from_numpy(self.homography).float().cuda()
 
     def forward(self, x):
+        import torchgeometry as tgm
         noise = torch.randn_like(x) * self.std_noise
         x = x + noise
         x = tgm.warp_perspective(x, self.homography[:, 1], (self.image_size, self.image_size))

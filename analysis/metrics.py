@@ -18,7 +18,7 @@ from utils.util import *
 from models.networks import *
 
 
-def main(num_saves=1):
+def main(num_saves=1, partial=True):
     if torch.cuda.is_available():
         print("---- GPU ----")
     else:
@@ -109,7 +109,7 @@ def main(num_saves=1):
     if opt.use_key:
         Rnet = RevealNet(
             input_nc=opt.channel_cover+opt.channel_key,
-            output_nc=opt.channel_secret,
+            output_nc=opt.channel_secret+int(opt.explicit),
             norm_type=opt.norm_type,
             output_function='sigmoid'
         )
@@ -151,6 +151,7 @@ def main(num_saves=1):
     H_LPIPS, R_LPIPS = AverageMeter(), AverageMeter()
     R_APD_, R_APD_s  = AverageMeter(), AverageMeter()
     Count = AverageMeter()
+    Key_Loss = AverageMeter()
 
     # turn on val mode
     Hnet.eval()
@@ -159,7 +160,7 @@ def main(num_saves=1):
     loss_fn_alex = LPIPS(net='alex')
     print("Hiding secrets and calculating metrics...")
     for i, (secret, cover) in tqdm(enumerate(zip(loader_secret, loader_cover), start=1)):
-        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff \
+        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff, key_loss \
             = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, opt.cover_dependent, opt.use_key, None)
 
         cover, container = cover.detach().cpu(), container.detach().cpu()
@@ -188,6 +189,8 @@ def main(num_saves=1):
         if opt.use_key:
             R_APD_.update(R_diff_.item(), batch_size)
         Count.update(count_diff, 1)
+        if opt.explicit:
+            Key_Loss.update(key_loss.item(), batch_size)
 
         cover_gap = ((container-cover)*10 + 0.5).clamp_(0.0, 1.0)
         show_all = torch.cat((cover, container, cover_gap), dim=0)
@@ -199,7 +202,10 @@ def main(num_saves=1):
             secret_gap = ((temp_rev_s-temp_s)*10 + 0.5).clamp_(0.0, 1.0)
             show_all = torch.cat((show_all, secret_gap), dim=0)
         if opt.use_key:
-            show_all = torch.cat((show_all, (rev_secret_*50).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
+            if not opt.explicit:
+                show_all = torch.cat((show_all, (rev_secret_*50).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
+            else:
+                show_all = torch.cat((show_all, rev_secret_.repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
 
         if i <= num_saves:
             save_path = '%s/hiding_%02d_secrets_modified_%03d_bits%d.png' % (opt.analysis_pics_save_dir, opt.num_secrets, opt.modified_bits, i)
@@ -207,14 +213,16 @@ def main(num_saves=1):
             ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
             im = Image.fromarray(ndarr)
             im.save(save_path)
+        if partial and i == 20:
+            break
 
-    log  = '\nH_APD=%.4f\tH_PSNR=%.4f\tH_SSIM=%.4f\tH_LPIPS=%.4f\nR_APD=%.4f\tR_PSNR=%.4f\tR_SSIM=%.4f\tR_LPIPS=%.4f\tR_APD_=%.4f\tR_APD_s=%.4f\tCount=%.4f' % (
+    log  = '\nH_APD=%.4f\tH_PSNR=%.4f\tH_SSIM=%.4f\tH_LPIPS=%.4f\nR_APD=%.4f\tR_PSNR=%.4f\tR_SSIM=%.4f\tR_LPIPS=%.4f\tR_APD_=%.4f\tR_APD_s=%.4f\tCount=%.4f\tKey_Loss=%.6f' % (
         H_APD.avg, H_PSNR.avg, H_SSIM.avg, H_LPIPS.avg,
         R_APD.avg, R_PSNR.avg, R_SSIM.avg, R_LPIPS.avg,
-        R_APD_.avg, R_APD_s.avg, Count.avg
+        R_APD_.avg, R_APD_s.avg, Count.avg, Key_Loss.avg
     )
     print_log(log)
 
 
 if __name__ == '__main__':
-    main(num_saves=3)
+    main(num_saves=3, partial=True)

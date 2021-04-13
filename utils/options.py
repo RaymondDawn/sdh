@@ -50,8 +50,10 @@ parser.add_argument('--lr_decay_freq', type=int, default=30, help='frequency of 
 parser.add_argument('--iters_per_epoch', type=int, default=1000, help='number of iterations in one epoch')
 parser.add_argument('--noise_type', type=str, default='identity', help='type of distortion [identity | noise | blur | resize | jpeg | combine]')
 parser.add_argument('--adversary', action='store_true', help='use adversarial structure')
-parser.add_argument('--stage_modification', action='store_true', help='a type of fake key')
+parser.add_argument('--redundance', type=int, default=32, help='redundance size of key; e.g. `16` for mapping it to a 3*16*16 tensor; `-1` for simple duplication')
+parser.add_argument('--generation_type', default='stair', help='a type of fake key [stair | random | custom | ELSE]')
 parser.add_argument('--static_key', action='store_true', help='use s static key')
+parser.add_argument('--explicit', action='store_true', help='extract secret explicitly')
 
 # additional parameters
 parser.add_argument('--test', action='store_true', help='test mode')
@@ -59,8 +61,8 @@ parser.add_argument('--load_checkpoint', action='store_true', help='load checkpo
 parser.add_argument('--checkpoint_name', type=str, default='', help='exper_name of loaded checkpoint')
 parser.add_argument('--checkpoint_type', type=str, default='best', help='type of the checkpint file [best | newest]')
 parser.add_argument('--checkpoint_path', type=str, default='', help='path of one checkpint file')
-parser.add_argument('--key', type=str, default='', help='key for encryption')
-parser.add_argument('--redundance', type=int, default=-1, help='redundance size of key; e.g. `16` for mapping it to a 3*16*16 tensor; `-1` for simple duplication')
+parser.add_argument('--key', type=str, default='hello world!', help='genuine key')
+parser.add_argument('--fake_key', type=str, default='this is a fake key', help='fake key')
 parser.add_argument('--modified_bits', type=int, default=0, help='number of modified bits in the key')
 
 
