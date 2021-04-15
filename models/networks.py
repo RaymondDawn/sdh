@@ -180,13 +180,22 @@ class RevealNet(nn.Module):
         self.norm5 = self.norm_layer(nrf)
 
     def forward(self, X):
-        X = self.relu(self.norm1(self.conv1(X)))
-        X = self.relu(self.norm2(self.conv2(X)))
-        X = self.relu(self.norm3(self.conv3(X)))
-        X = self.relu(self.norm4(self.conv4(X)))
-        X = self.relu(self.norm5(self.conv5(X)))
-        output = self.output(self.conv6(X))
-        return output
+        if opt.feature_map:
+          X1 = self.relu(self.norm1(self.conv1(X)))
+          X2 = self.relu(self.norm2(self.conv2(X1)))
+          X3 = self.relu(self.norm3(self.conv3(X2)))
+          X4 = self.relu(self.norm4(self.conv4(X3)))
+          X5 = self.relu(self.norm5(self.conv5(X4)))
+          output = self.output(self.conv6(X5))
+          return X1, X2, X3, X4, X5, output
+        else:
+          X = self.relu(self.norm1(self.conv1(X)))
+          X = self.relu(self.norm2(self.conv2(X)))
+          X = self.relu(self.norm3(self.conv3(X)))
+          X = self.relu(self.norm4(self.conv4(X)))
+          X = self.relu(self.norm5(self.conv5(X)))
+          output = self.output(self.conv6(X))
+          return output
 
 
 class AttackNet(nn.Module):

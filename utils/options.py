@@ -64,6 +64,7 @@ parser.add_argument('--checkpoint_path', type=str, default='', help='path of one
 parser.add_argument('--key', type=str, default='hello world!', help='genuine key')
 parser.add_argument('--fake_key', type=str, default='this is a fake key', help='fake key')
 parser.add_argument('--modified_bits', type=int, default=0, help='number of modified bits in the key')
+parser.add_argument('--feature_map', action='store_true', help='show the feature maps of Rnet')
 
 
 opt = parser.parse_args()

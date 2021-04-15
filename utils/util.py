@@ -159,10 +159,7 @@ def save_result_pic(batch_size, cover, container, secret_set, rev_secret_set, re
     show_all = torch.cat((show_cover, show_secret), dim=0)
     if rev_secret_ is not None:
         rev_secret_ = rev_secret_.repeat(1, 3//opt.channel_secret, 1, 1)
-        if not opt.explicit:
-            show_all = torch.cat((show_all, (rev_secret_*50).clamp_(0.0, 1.0)), dim=0)
-        else:
-            show_all = torch.cat((show_all, rev_secret_.clamp_(0.0, 1.0)), dim=0)
+        show_all = torch.cat((show_all, (rev_secret_*50).clamp_(0.0, 1.0)), dim=0)
 
     # vutils.save_image(show_all, result_name, batch_size, padding=1, normalize=False)
     grid = vutils.make_grid(show_all, nrow=batch_size, padding=1, normalize=False)
@@ -270,7 +267,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
                     s.add(index)
                     fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
         elif opt.generation_type == 'stair': # stair strategy
-            assert (opt.num_secrets == 1) and (epoch is not None)
+            assert (opt.num_secrets == 1) and (epoch is not None) and (opt.epochs == len(MODIFIED_BITS)*10)
             fake_key, s = key_set[0].clone(), set()
             bits = MODIFIED_BITS[epoch//10]
             for j in range(bits):
@@ -326,8 +323,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
 
     container = NoiseLayers(container)
 
-    R_loss, key_loss = 0, 0
-    criterion_key = nn.BCEWithLogitsLoss().cuda()
+    R_loss = 0
     if use_key:
         for i in range(opt.num_secrets):
             # modify key to test the sensitivity
@@ -342,13 +338,12 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
             red_key_ = Enet(key_)
             if not opt.explicit:
                 rev_secret_set.append(Rnet(torch.cat((container, red_key_), dim=1)))
+                R_loss += criterion(rev_secret_set[i], secret_set[i])
             else:
                 sec_p = Rnet(torch.cat((container, red_key_), dim=1))
-                rev_secret_set.append(sec_p[:, :opt.channel_secret, :, :])
-                p = sec_p[:, -1, :, :]
-                TRUE = torch.ones(p.shape).cuda()
-                key_loss += criterion_key(p, TRUE)
-            R_loss += criterion(rev_secret_set[i], secret_set[i])
+                TRUE = torch.ones(b, opt.channel_key, h, w).cuda()
+                R_loss += criterion(sec_p, torch.cat((secret_set[i], TRUE), dim=1))
+                rev_secret_set.append(sec_p[:, :opt.channel_secret, :, :].detach() * sec_p[:, opt.channel_secret:, :, :].detach())
     else:
         R_output = Rnet(container)
         for i in range(opt.num_secrets):
@@ -365,11 +360,9 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         else:
             assert opt.num_secrets == 1
             sec_p = Rnet(torch.cat((container, red_fake_key), dim=1))
-            rev_secret_ = sec_p[:, :opt.channel_secret, :, :]
-            R_loss = (R_loss + criterion(rev_secret_, secret_set[0])) / 2
-            p = sec_p[:, -1, :, :]
-            FALSE = torch.zeros(p.shape).cuda()
-            key_loss += criterion_key(p, FALSE)
+            FALSE = torch.zeros(b, opt.channel_key, h, w).cuda()
+            R_loss = ( R_loss + criterion(sec_p, torch.cat((secret_set[0], FALSE), dim=1)) ) / 2
+            rev_secret_ = sec_p[:, :opt.channel_secret, :, :].detach()# * sec_p[:, opt.channel_secret:, :, :].detach()
 
     # L1 metric (APD)
     H_diff = (container - cover).abs().mean() * 255
@@ -378,7 +371,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         R_diff += (rev_secret_set[i] - secret_set[i]).abs().mean() * 255
     R_diff /= opt.num_secrets
 
-    return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff, key_loss
+    return cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff
 
 
 def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader_cover, Hnet, Rnet, Enet, NoiseLayers, optimizer, scheduler, criterion, cover_dependent, use_key, Adversary=None, optimizer_adv=None):
@@ -421,7 +414,6 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
         Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
         Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeors)
         Count = AverageMeter()
-        KeyLoss = AverageMeter()
         # turn on training mode
         Hnet.train()
         Rnet.train()
@@ -432,7 +424,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             data_time.update(time.time() - start_time)
             batch_size = opt.batch_size
 
-            cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff, key_loss \
+            cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff \
                 = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key, epoch)
             
             if Adversary is not None:
@@ -450,8 +442,6 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             Hdiff.update(H_diff.item(), batch_size)
             Rdiff.update(R_diff.item(), batch_size)
             Count.update(count_diff, 1)
-            if opt.explicit:
-                KeyLoss.update(key_loss.item(), batch_size)
             if use_key and not opt.explicit:
                 Rlosses_.update(R_loss_.item(), batch_size)
                 Rdiff_.update(R_diff_.item(), batch_size)
@@ -462,7 +452,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
                 A_loss = 0
 
             rate = (i+epoch*opt.iters_per_epoch) / (50*opt.iters_per_epoch) if epoch < 50 else 1
-            loss_sum = H_loss + opt.beta * R_loss + opt.gamma * R_loss_ + opt.delta * rate * A_loss + opt.delta * key_loss
+            loss_sum = H_loss + opt.beta * R_loss + opt.gamma * R_loss_ + opt.delta * rate * A_loss
 
             SumLosses.update(loss_sum.item(), batch_size)
 
@@ -473,11 +463,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             batch_time.update(time.time() - start_time)
             start_time = time.time()
 
-            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tA_loss: %.6f A_loss_: %.6f\tCount: %.4f Key_loss: %.6f\tdata_time: %.4f batch_time: %.4f" % (
+            log = "[%02d/%d] [%04d/%d]\tH_loss: %.6f R_loss: %.6f R_loss_:%.6f H_diff: %.4f R_diff: %.4f R_diff_: %.4f\tA_loss: %.6f A_loss_: %.6f\tCount: %.4f\tdata_time: %.4f batch_time: %.4f" % (
                 epoch, opt.epochs, i, opt.iters_per_epoch,
                 Hlosses.val, Rlosses.val, Rlosses_.val,
                 Hdiff.val, Rdiff.val, Rdiff_.val,
-                Alosses.val, Alosses_.val, Count.val, KeyLoss.val,
+                Alosses.val, Alosses_.val, Count.val,
                 data_time.val, batch_time.val
             )
 
@@ -501,11 +491,11 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             epoch, i,
             opt.train_pics_save_dir
         )
-        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tALoss=%.6f\tALoss_=%.6f\tCount=%.4f\tKeyLoss=%.6f\tlr= %.6f\tEpoch Time=%.4f" % (
+        epoch_log = "Training Epoch[%02d]\tSumloss=%.6f\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tALoss=%.6f\tALoss_=%.6f\tCount=%.4f\tlr= %.6f\tEpoch Time=%.4f" % (
             epoch, SumLosses.avg,
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
             Hdiff.avg, Rdiff.avg, Rdiff_.avg,
-            Alosses.avg, Alosses_.avg, Count.avg, KeyLoss.avg,
+            Alosses.avg, Alosses_.avg, Count.avg,
             optimizer.param_groups[0]['lr'],
             batch_time.sum
         )
@@ -577,14 +567,13 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
     Rdiff = AverageMeter()       # APD for reveal network (between rev_secret and secret)
     Rdiff_ = AverageMeter()      # APD for reveal network (between rev_secret_ and zeros)
     Count = AverageMeter()
-    KeyLoss = AverageMeter()
 
     # turn on val mode
     Hnet.eval()
     Rnet.eval()
 
     for i, (secret, cover) in enumerate(data_loader, start=1):
-        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff, key_loss \
+        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff \
             = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_dependent, use_key, epoch)
 
         Hlosses.update(H_loss.item(), batch_size)
@@ -592,8 +581,6 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
         Hdiff.update(H_diff.item(), batch_size)
         Rdiff.update(R_diff.item(), batch_size)
         Count.update(count_diff, 1)
-        if opt.explicit:
-            KeyLoss.update(key_loss.item(), batch_size)
         if use_key and not opt.explicit:
             Rlosses_.update(R_loss_.item(), batch_size)
             Rdiff_.update(R_diff_.item(), batch_size)
@@ -619,13 +606,13 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
     if mode == 'test':
         log = 'Test\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tCount=%.4f\tKeyloss=%.6f' % (
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
-            Hdiff.avg, Rdiff.avg, Rdiff_.avg, Count.avg, KeyLoss.avg
+            Hdiff.avg, Rdiff.avg, Rdiff_.avg, Count.avg
         )
     else:
-        log = 'Validation[%02d]\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tCount=%.4f\tKeyloss=%.6f' % (
+        log = 'Validation[%02d]\tHloss=%.6f\tRloss=%.6f\tRloss_=%.6f\tHdiff=%.4f\tRdiff=%.4f\tRdiff_=%.4f\tCount=%.4f' % (
             epoch,
             Hlosses.avg, Rlosses.avg, Rlosses_.avg,
-            Hdiff.avg, Rdiff.avg, Rdiff_.avg, Count.avg, KeyLoss.avg
+            Hdiff.avg, Rdiff.avg, Rdiff_.avg, Count.avg
         )
     print_log(log)
     print("#### %s end ####\n" % mode)

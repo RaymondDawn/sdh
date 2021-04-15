@@ -2,13 +2,14 @@ import os
 import copy
 from tqdm import tqdm
 from PIL import Image
+import numpy as np
+import matplotlib.pyplot as plt
+
 import torch
 from torch import nn, optim
 from torch.backends import cudnn
 from torch.utils.data import DataLoader
 from torchvision import transforms
-
-from lpips import LPIPS
 
 import sys
 sys.path.append(".")
@@ -18,7 +19,7 @@ from utils.util import *
 from models.networks import *
 
 
-def main(num_saves=1, partial=True):
+def main(fake=True):
     if torch.cuda.is_available():
         print("---- GPU ----")
     else:
@@ -109,7 +110,7 @@ def main(num_saves=1, partial=True):
     if opt.use_key:
         Rnet = RevealNet(
             input_nc=opt.channel_cover+opt.channel_key,
-            output_nc=opt.channel_secret+int(opt.explicit)*opt.channel_key,
+            output_nc=opt.channel_secret+int(opt.explicit),
             norm_type=opt.norm_type,
             output_function='sigmoid'
         )
@@ -143,83 +144,62 @@ def main(num_saves=1, partial=True):
     if opt.loss == 'l2':
         criterion = nn.MSELoss().cuda()
 
-    # metrics
-    batch_size = opt.batch_size
-    H_APD  , R_APD   = AverageMeter(), AverageMeter()
-    H_PSNR , R_PSNR  = AverageMeter(), AverageMeter()
-    H_SSIM , R_SSIM  = AverageMeter(), AverageMeter()
-    H_LPIPS, R_LPIPS = AverageMeter(), AverageMeter()
-    R_APD_, R_APD_s  = AverageMeter(), AverageMeter()
-    Count = AverageMeter()
-
     # turn on val mode
     Hnet.eval()
     Rnet.eval()
 
-    loss_fn_alex = LPIPS(net='alex')
-    print("Hiding secrets and calculating metrics...")
-    for i, (secret, cover) in tqdm(enumerate(zip(loader_secret, loader_cover), start=1)):
-        cover, container, secret_set, rev_secret_set, rev_secret_, H_loss, R_loss, R_loss_, H_diff, R_diff, R_diff_, count_diff \
-            = forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, opt.cover_dependent, opt.use_key, None)
+    for i, (secret, cover) in enumerate(zip(loader_secret, loader_cover), start=1):
+        cover, secret = cover.cuda(), secret.cuda()
+        (b, c, h, w), (_, c_s, h_s, w_s) = cover.shape, secret.shape
+        assert h == h_s and w == w_s and opt.num_secrets == 1
 
-        cover, container = cover.detach().cpu(), container.detach().cpu()
-        for j in range(opt.num_secrets):
-            secret_set[j] = secret_set[j].detach().cpu()
-            rev_secret_set[j] = rev_secret_set[j].detach().cpu()
-        if opt.use_key:
-            rev_secret_ = rev_secret_.detach().cpu()
+        key = torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda()
+        red_key = Enet(key)
 
-        H_APD.update(H_diff.item(), batch_size)
-        R_APD.update(R_diff.item(), batch_size)
-        R_APD_s.update((rev_secret_set[0]).abs().mean() * 255, batch_size)
-        h_psnr, r_psnr = PSNR(cover, container), 0
-        h_ssim, r_ssim = SSIM(cover, container), 0
-        h_lpips, r_lpips = loss_fn_alex(cover, container).mean(), 0
-        for j in range(opt.num_secrets):
-            r_psnr += PSNR(secret_set[j], rev_secret_set[j])
-            r_ssim += SSIM(secret_set[j], rev_secret_set[j])
-            r_lpips += loss_fn_alex(secret_set[j], rev_secret_set[j]).mean()
-        H_PSNR.update(h_psnr, batch_size)
-        H_SSIM.update(h_ssim, batch_size)
-        H_LPIPS.update(h_lpips, batch_size)
-        R_PSNR.update(r_psnr/opt.num_secrets, batch_size)
-        R_SSIM.update(r_ssim/opt.num_secrets, batch_size)
-        R_LPIPS.update(r_lpips/opt.num_secrets, batch_size)
-        if opt.use_key and not opt.explicit:
-            R_APD_.update(R_diff_.item(), batch_size)
-        Count.update(count_diff, 1)
+        fake_key, s = key.clone(), set()
+        for j in range(64):
+            index = (j + int(np.random.rand() * 128)) % 128
+            while index in s:
+                index = (j + int(np.random.rand() * 128)) % 128
+            s.add(index)
+            fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
+        red_fake_key = Enet(fake_key)
 
-        cover_gap = ((container-cover)*10 + 0.5).clamp_(0.0, 1.0)
-        show_all = torch.cat((cover, container, cover_gap), dim=0)
-        for j in range(opt.num_secrets):
-            temp_s = secret_set[j].repeat(1, 3//opt.channel_secret, 1, 1)
-            temp_rev_s = rev_secret_set[j].repeat(1, 3//opt.channel_secret, 1, 1)
-            show_all = torch.cat((show_all, temp_s, temp_rev_s), dim=0)
-        if opt.num_secrets == 1:
-            secret_gap = ((temp_rev_s-temp_s)*10 + 0.5).clamp_(0.0, 1.0)
-            show_all = torch.cat((show_all, secret_gap), dim=0)
-        if opt.use_key:
-            if not opt.explicit:
-                show_all = torch.cat((show_all, (rev_secret_*50).repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
-            else:
-                show_all = torch.cat((show_all, rev_secret_.repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
+        H_input = torch.cat((secret, red_key), dim=1)
+        H_output = Hnet(H_input)
+        container = H_output + cover
 
-        if i <= num_saves:
-            save_path = '%s/hiding_%02d_secrets_modified_%03d_bits%d.png' % (opt.analysis_pics_save_dir, opt.num_secrets, opt.modified_bits, i)
-            grid = vutils.make_grid(show_all, nrow=opt.batch_size, padding=1, normalize=False)
-            ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
-            im = Image.fromarray(ndarr)
-            im.save(save_path)
-        if partial and i == 1:
-            break
+        assert opt.feature_map
+        if fake:
+          X1, X2, X3, X4, X5, output = Rnet(torch.cat((container, red_fake_key), dim=1))
+        else:
+          X1, X2, X3, X4, X5, output = Rnet(torch.cat((container, red_fake_key), dim=1))
 
-    log  = '\nH_APD=%.4f\tH_PSNR=%.4f\tH_SSIM=%.4f\tH_LPIPS=%.4f\nR_APD=%.4f\tR_PSNR=%.4f\tR_SSIM=%.4f\tR_LPIPS=%.4f\tR_APD_=%.4f\tR_APD_s=%.4f\tCount=%.4f' % (
-        H_APD.avg, H_PSNR.avg, H_SSIM.avg, H_LPIPS.avg,
-        R_APD.avg, R_PSNR.avg, R_SSIM.avg, R_LPIPS.avg,
-        R_APD_.avg, R_APD_s.avg, Count.avg
-    )
-    print_log(log)
+        X = X5
+        d, index = X.shape[1], 22
+        for j in range(d//64):
+          for k in range(64):
+              ax = plt.subplot(8, 8, k + 1)
+              ax.axis('off')
+              plt.imshow(X.detach().cpu().numpy()[index,k,:,:])
+          plt.savefig('%s/feature_map_%02d.png' % (opt.analysis_pics_save_dir, j))
+          plt.show()
+
+        plt.imshow(container.permute(0,2,3,1).detach().cpu().numpy()[index,:,:,:])
+        ax.axis('off')
+        plt.savefig('%s/container.png' % opt.analysis_pics_save_dir)
+        plt.show()
+        plt.imshow(secret.permute(0,2,3,1).detach().cpu().numpy()[index,:,:,:])
+        ax.axis('off')
+        plt.savefig('%s/secret.png' % opt.analysis_pics_save_dir)
+        plt.show()
+        plt.imshow(output.permute(0,2,3,1).detach().cpu().numpy()[index,:,:,:])
+        ax.axis('off')
+        plt.savefig('%s/output.png' % opt.analysis_pics_save_dir)
+        plt.show()
+        
+        break
 
 
 if __name__ == '__main__':
-    main(num_saves=3, partial=True)
+    main(fake=True)
