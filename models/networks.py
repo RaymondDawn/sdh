@@ -2,6 +2,7 @@ import functools
 import torch
 from torch import nn
 
+from utils.options import opt
 from .noise_layers import *
 
 
