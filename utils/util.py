@@ -40,7 +40,13 @@ def md5(key: str) -> torch.Tensor:
     binary_key = ''.join(format(x, '08b') for x in hash_key)
     tensor_key = torch.Tensor([float(x) for x in binary_key]).cuda()
     return tensor_key
-STATIC_KEYS = [md5(opt.key)]
+if '[' not in opt.key:
+    STATIC_KEYS = [md5(opt.key)]
+else:
+    STATIC_KEYS = []
+    rkeys = eval(opt.key)
+    for rk in rkeys:
+        STATIC_KEYS.append(md5(rk))
 
 
 def weights_init(m):
@@ -241,9 +247,10 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
     (b, c, h, w), (_, c_s, h_s, w_s) = cover.shape, secret.shape
     assert h == h_s and w == w_s
     
-    secret_set, rev_secret_set = [], []
+    secret_set, rev_secret_set, ALL_SECRETS = [], [], torch.zeros(b, c_s*opt.num_secrets, h, w).cuda()
     for i in range(opt.num_secrets):
         secret_set.append(secret[b*i:b*(i+1), :, :, :])
+        ALL_SECRETS[:, i*c_s:(i+1)*c_s, :, :] = secret_set[i]
 
     count_diff = 0
     # pre-processing for key(s)
@@ -257,15 +264,15 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
                 key_set.append(torch.Tensor([float(torch.randn(1)<0) for _ in range(w)]).cuda())
         
         if opt.generation_type == 'random': # random strategy
-            if opt.num_secrets == 1:
-                fake_key, s = key_set[0].clone(), set()
-                bits = np.random.randint(8,129)
-                for j in range(bits):
+            assert (opt.num_secrets == 1)
+            fake_key, s = key_set[0].clone(), set()
+            bits = np.random.randint(8,129)
+            for j in range(bits):
+                index = (j + int(np.random.rand() * 128)) % 128
+                while index in s:
                     index = (j + int(np.random.rand() * 128)) % 128
-                    while index in s:
-                        index = (j + int(np.random.rand() * 128)) % 128
-                    s.add(index)
-                    fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
+                s.add(index)
+                fake_key[index] = -fake_key[index] + 1  # 0->1; 1->0
         elif opt.generation_type == 'stair': # stair strategy
             assert (opt.num_secrets == 1) and (epoch is not None) and (opt.epochs == len(MODIFIED_BITS)*10)
             fake_key, s = key_set[0].clone(), set()
@@ -341,9 +348,14 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
                 R_loss += criterion(rev_secret_set[i], secret_set[i])
             else:
                 sec_p = Rnet(torch.cat((container, red_key_), dim=1))
-                TRUE = torch.ones(b, opt.channel_key, h, w).cuda()
-                R_loss += criterion(sec_p, torch.cat((secret_set[i], TRUE), dim=1))
-                rev_secret_set.append(sec_p[:, :opt.channel_secret, :, :].detach() * sec_p[:, opt.channel_secret:, :, :].detach())
+                LABEL = torch.zeros(b, opt.channel_key*opt.num_secrets, h, w).cuda()
+                LABEL[:, i*opt.channel_key:(i+1)*opt.channel_key, :, :] = torch.ones(b, opt.channel_key, h, w).cuda()
+                R_loss += criterion(sec_p, torch.cat((ALL_SECRETS, LABEL), dim=1))
+                rev_secret_temp = sec_p[:, :c_s*opt.num_secrets, :, :].detach() * sec_p[:, c_s*opt.num_secrets:, :, :].detach()
+                rev_secret = torch.zeros(b, c_s, h, w).cuda()
+                for j in range(opt.num_secrets):
+                    rev_secret += rev_secret_temp[:, j, :, :].unsqueeze(1)
+                rev_secret_set.append(rev_secret)
     else:
         R_output = Rnet(container)
         for i in range(opt.num_secrets):
@@ -358,11 +370,13 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
             R_loss_ = criterion(rev_secret_, zeros)
             R_diff_ = (rev_secret_).abs().mean() * 255
         else:
-            assert opt.num_secrets == 1
             sec_p = Rnet(torch.cat((container, red_fake_key), dim=1))
-            FALSE = torch.zeros(b, opt.channel_key, h, w).cuda()
-            R_loss = ( R_loss + criterion(sec_p, torch.cat((secret_set[0], FALSE), dim=1)) ) / 2
-            rev_secret_ = sec_p[:, :opt.channel_secret, :, :].detach()# * sec_p[:, opt.channel_secret:, :, :].detach()
+            LABEL = torch.zeros(b, opt.channel_key*opt.num_secrets, h, w).cuda()
+            R_loss = ( R_loss*opt.num_secrets + criterion(sec_p, torch.cat((ALL_SECRETS, LABEL), dim=1)) ) / (opt.num_secrets+1)
+            rev_secret_temp_ = sec_p[:, :c_s*opt.num_secrets, :, :].detach() * sec_p[:, c_s*opt.num_secrets:, :, :].detach()
+            rev_secret_ = torch.zeros(b, c_s, h, w).cuda()
+            for j in range(opt.num_secrets):
+                rev_secret_ += rev_secret_temp_[:, j, :, :].unsqueeze(1)
 
     # L1 metric (APD)
     H_diff = (container - cover).abs().mean() * 255
