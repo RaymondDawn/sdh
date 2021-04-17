@@ -300,7 +300,7 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
         for key in key_set:
             red_key_set.append(Enet(key))
         red_fake_key = Enet(fake_key)
-        zeros = torch.zeros(red_key_set[0].shape).cuda()
+        zeros = torch.zeros(b, c_s, h, w).cuda()
 
     if cover_dependent:
         if use_key:
@@ -348,13 +348,14 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
                 R_loss += criterion(rev_secret_set[i], secret_set[i])
             else:
                 sec_p = Rnet(torch.cat((container, red_key_), dim=1))
-                LABEL = torch.zeros(b, opt.channel_key*opt.num_secrets, h, w).cuda()
-                LABEL[:, i*opt.channel_key:(i+1)*opt.channel_key, :, :] = torch.ones(b, opt.channel_key, h, w).cuda()
+                LABEL = torch.zeros(b, opt.channel_prob*opt.num_secrets, h, w).cuda()
+                LABEL[:, i*opt.channel_prob:(i+1)*opt.channel_prob, :, :] = torch.ones(b, opt.channel_prob, h, w).cuda()
                 R_loss += criterion(sec_p, torch.cat((ALL_SECRETS, LABEL), dim=1))
-                rev_secret_temp = sec_p[:, :c_s*opt.num_secrets, :, :].detach() * sec_p[:, c_s*opt.num_secrets:, :, :].detach()
                 rev_secret = torch.zeros(b, c_s, h, w).cuda()
                 for j in range(opt.num_secrets):
-                    rev_secret += rev_secret_temp[:, j, :, :].unsqueeze(1)
+                    s = sec_p[:, j*c_s:(j+1)*c_s, :, :].detach()
+                    p = (sec_p[:, opt.num_secrets*c_s+j*opt.channel_prob:opt.num_secrets*c_s+(j+1)*opt.channel_prob, :, :].detach()).repeat(1, opt.channel_secret//opt.channel_prob, 1, 1)
+                    rev_secret += s * p
                 rev_secret_set.append(rev_secret)
     else:
         R_output = Rnet(container)
@@ -371,12 +372,15 @@ def forward_pass(secret, cover, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_
             R_diff_ = (rev_secret_).abs().mean() * 255
         else:
             sec_p = Rnet(torch.cat((container, red_fake_key), dim=1))
-            LABEL = torch.zeros(b, opt.channel_key*opt.num_secrets, h, w).cuda()
+            LABEL = torch.zeros(b, opt.channel_prob*opt.num_secrets, h, w).cuda()
             R_loss = ( R_loss*opt.num_secrets + criterion(sec_p, torch.cat((ALL_SECRETS, LABEL), dim=1)) ) / (opt.num_secrets+1)
-            rev_secret_temp_ = sec_p[:, :c_s*opt.num_secrets, :, :].detach() * sec_p[:, c_s*opt.num_secrets:, :, :].detach()
             rev_secret_ = torch.zeros(b, c_s, h, w).cuda()
             for j in range(opt.num_secrets):
-                rev_secret_ += rev_secret_temp_[:, j, :, :].unsqueeze(1)
+                s = sec_p[:, j*c_s:(j+1)*c_s, :, :].detach()
+                p = (sec_p[:, opt.num_secrets*c_s+j*opt.channel_prob:opt.num_secrets*c_s+(j+1)*opt.channel_prob, :, :].detach()).repeat(1, opt.channel_secret//opt.channel_prob, 1, 1)
+                rev_secret_ += s * p
+            R_loss_ = criterion(rev_secret_, zeros)
+            R_diff_ = (rev_secret_).abs().mean() * 255
 
     # L1 metric (APD)
     H_diff = (container - cover).abs().mean() * 255
@@ -456,7 +460,7 @@ def train(train_loader_secret, train_loader_cover, val_loader_secret, val_loader
             Hdiff.update(H_diff.item(), batch_size)
             Rdiff.update(R_diff.item(), batch_size)
             Count.update(count_diff, 1)
-            if use_key and not opt.explicit:
+            if use_key:
                 Rlosses_.update(R_loss_.item(), batch_size)
                 Rdiff_.update(R_diff_.item(), batch_size)
             if Adversary is not None:
@@ -595,7 +599,7 @@ def inference(data_loader, Hnet, Rnet, Enet, NoiseLayers, criterion, cover_depen
         Hdiff.update(H_diff.item(), batch_size)
         Rdiff.update(R_diff.item(), batch_size)
         Count.update(count_diff, 1)
-        if use_key and not opt.explicit:
+        if use_key:
             Rlosses_.update(R_loss_.item(), batch_size)
             Rdiff_.update(R_diff_.item(), batch_size)
 

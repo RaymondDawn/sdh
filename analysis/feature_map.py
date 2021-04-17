@@ -108,9 +108,13 @@ def main(fake=True):
             output_function='tanh'
         )
     if opt.use_key:
+        if opt.explicit:
+            temp = opt.num_secrets
+        else:
+            temp = 1
         Rnet = RevealNet(
             input_nc=opt.channel_cover+opt.channel_key,
-            output_nc=opt.channel_secret+int(opt.explicit),
+            output_nc=opt.channel_secret*temp + int(opt.explicit)*opt.channel_prob*opt.num_secrets,
             norm_type=opt.norm_type,
             output_function='sigmoid'
         )

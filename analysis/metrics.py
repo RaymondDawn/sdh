@@ -113,7 +113,7 @@ def main(num_saves=1, partial=True):
             temp = 1
         Rnet = RevealNet(
             input_nc=opt.channel_cover+opt.channel_key,
-            output_nc=opt.channel_secret*temp + int(opt.explicit)*opt.channel_key*opt.num_secrets,
+            output_nc=opt.channel_secret*temp + int(opt.explicit)*opt.channel_prob*opt.num_secrets,
             norm_type=opt.norm_type,
             output_function='sigmoid'
         )
@@ -214,7 +214,7 @@ def main(num_saves=1, partial=True):
             ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
             im = Image.fromarray(ndarr)
             im.save(save_path)
-        if partial and i == 20:
+        if partial and i == 2:
             break
 
     log  = '\nH_APD=%.4f\tH_PSNR=%.4f\tH_SSIM=%.4f\tH_LPIPS=%.4f\nR_APD=%.4f\tR_PSNR=%.4f\tR_SSIM=%.4f\tR_LPIPS=%.4f\tR_APD_=%.4f\tR_APD_s=%.4f\tCount=%.4f' % (

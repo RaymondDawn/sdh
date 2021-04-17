@@ -33,6 +33,7 @@ parser.add_argument('--use_key', action='store_true', help='use key or not')
 parser.add_argument('--channel_cover', type=int, default=3, help='number of channels for cover images')
 parser.add_argument('--channel_secret', type=int, default=3, help='number of channels for secret images')
 parser.add_argument('--channel_key', type=int, default=3, help='number of channels for embedded key')
+parser.add_argument('--channel_prob', type=int, default=3, help='number of channels for probability in naive SDH')
 parser.add_argument('--num_downs', type=int, default=5, help='number of down submodules in U-Net')
 parser.add_argument('--norm_type', type=str, default='batch', help='type of normalization layer')
 parser.add_argument('--loss', type=str, default='l2', help='loss function [l1 | l2]')
@@ -61,6 +62,8 @@ parser.add_argument('--load_checkpoint', action='store_true', help='load checkpo
 parser.add_argument('--checkpoint_name', type=str, default='', help='exper_name of loaded checkpoint')
 parser.add_argument('--checkpoint_type', type=str, default='best', help='type of the checkpint file [best | newest]')
 parser.add_argument('--checkpoint_path', type=str, default='', help='path of one checkpint file')
+parser.add_argument('--checkpoint_type_', type=str, default='best', help='type of the checkpint file [best | newest]')
+parser.add_argument('--checkpoint_path_', type=str, default='', help='path of one checkpint file')
 parser.add_argument('--key', type=str, default='hello world!', help='genuine key')
 parser.add_argument('--fake_key', type=str, default='this is a fake key', help='fake key')
 parser.add_argument('--modified_bits', type=int, default=0, help='number of modified bits in the key')
@@ -97,3 +100,4 @@ opt.test_pics_save_dir = opt.exper_dir + '/test_pics'
 opt.analysis_pics_save_dir = opt.exper_dir + '/analysis_pics'
 opt.loss_save_path = opt.exper_dir + '/train_loss.png'
 opt.checkpoint_path = _load_checkpoint_dir + '/checkpoints/checkpoint_%s.pth.tar' % opt.checkpoint_type
+opt.checkpoint_path_ = _load_checkpoint_dir + '/checkpoints_/checkpoint_%s.pth.tar' % opt.checkpoint_type_
