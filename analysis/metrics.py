@@ -208,13 +208,16 @@ def main(num_saves=1, partial=True):
             else:
                 show_all = torch.cat((show_all, rev_secret_.repeat(1, 3//opt.channel_secret, 1, 1)), dim=0)
 
+        #temp = rev_secret_set[0]*0.5 + rev_secret_set[1]*0.5
+        #show_all = torch.cat((show_all, temp), dim=0)
+
         if i <= num_saves:
             save_path = '%s/hiding_%02d_secrets_modified_%03d_bits%d.png' % (opt.analysis_pics_save_dir, opt.num_secrets, opt.modified_bits, i)
             grid = vutils.make_grid(show_all, nrow=opt.batch_size, padding=1, normalize=False)
             ndarr = grid.mul(255).add_(0.5).clamp_(0, 255).permute(1, 2, 0).to('cpu', torch.uint8).numpy()
             im = Image.fromarray(ndarr)
             im.save(save_path)
-        if partial and i == 2:
+        if partial and i == 20:
             break
 
     log  = '\nH_APD=%.4f\tH_PSNR=%.4f\tH_SSIM=%.4f\tH_LPIPS=%.4f\nR_APD=%.4f\tR_PSNR=%.4f\tR_SSIM=%.4f\tR_LPIPS=%.4f\tR_APD_=%.4f\tR_APD_s=%.4f\tCount=%.4f' % (
